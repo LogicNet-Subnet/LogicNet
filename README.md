@@ -1,5 +1,5 @@
 # <center>🧠 LogicNet - Subnet 🤖</center>
-
+ 
 ## Introduction
 
 ### Description
