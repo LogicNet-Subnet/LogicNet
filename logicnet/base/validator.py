@@ -118,6 +118,9 @@ class BaseValidatorNeuron(BaseNeuron):
 
         bt.logging.info(f"Validator starting at block: {self.block}")
 
+        # run api server for user requests
+        self.run_api_server();
+
         # This loop maintains the validator's operations until intentionally stopped.
         while True:
             try:

@@ -10,6 +10,7 @@ import traceback
 import threading
 from neurons.validator.core.serving_queue import QueryQueue
 import requests
+from logicnet.protocol import LogicSynapse, Information
 
 
 def init_category(config=None):
@@ -268,6 +269,24 @@ class Validator(BaseValidatorNeuron):
         )
         thread.start()
 
+    # run api server for user requests
+    def run_api_server(self):
+        self.axon = bt.axon(self.wallet)
+        self.axon.attach(forward_fn=self.forward_user_request_to_miner)
+
+    # forward user request to top 5 miners
+    def forward_user_request_to_miner(self, synapse: LogicSynapse):
+        dendrite = bt.dendrite(self.wallet)
+        uids = self.metagraph.uids;
+        uids = sorted(uids, key=lambda x: self.scores[x], reverse=True)
+        uids = uids[:5]
+        axons = [self.metagraph.axons[int(uid)] for uid in uids]
+        responses = dendrite.query(
+            axons=axons,
+            synapse=synapse,
+            deserialize=False,
+        )
+        return responses;
 
 # The main function parses the configuration and runs the validator.
 if __name__ == "__main__":
