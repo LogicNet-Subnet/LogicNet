@@ -118,8 +118,9 @@ class LogicRewarder:
         Returns:
             list[float]: List of correctness scores for each response (float between 0 and 1).
         """
-        ground_truth_answer = base_synapse.ground_truth_answer
-        bt.logging.debug(f"[CORRECTNESS] Ground truth: {ground_truth_answer}")
+        ground_truth_answer = self._extract_numerical_ground_truth(base_synapse.ground_truth_answer)
+        bt.logging.debug(f"[CORRECTNESS] Ground truth: {base_synapse.ground_truth_answer}")
+        bt.logging.debug(f"[CORRECTNESS] Extracted numerical ground truth: {ground_truth_answer}")
         correctness = []
         batch_messages = []
         indices_for_llm = []
@@ -127,6 +128,7 @@ class LogicRewarder:
         for idx, response in enumerate(responses):
             miner_answer = response.logic_answer.strip()
             # Try programmatic comparison
+            bt.logging.debug(f"[CORRECTNESS] Miner answer: {miner_answer}")
             score = self._compare_numerical_answers(ground_truth_answer, miner_answer)
             if score is not None:
                 correctness.append(score)
@@ -248,3 +250,44 @@ class LogicRewarder:
         response = response.choices[0].message.content
         bt.logging.debug(f"[SIMILARITY] Self-generated ground truth: {response}")
         return response
+
+    def _extract_numerical_ground_truth(self, ground_truth: str):
+        """Extract numerical value or expression from a complex ground truth answer.
+
+        Args:
+            ground_truth (str): The complex ground truth answer.
+
+        Returns:
+            str: Extracted numerical value or expression as a string.
+        """
+        # Attempt to parse the ground truth as a sympy expression
+        try:
+            sympy_expr = sympy.sympify(ground_truth)
+            return str(sympy_expr)
+        except (sympy.SympifyError, TypeError):
+            # If parsing fails, use regex to extract numerical values
+            import re
+            numbers = re.findall(r"[-+]?\d*\.\d+|\d+", ground_truth)
+            if numbers:
+                return ', '.join(numbers)
+            else:
+                # If regex fails, use LLM to extract the numerical value
+                messages = [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please extract all numerical values from the following text. "
+                            "Focus on identifying key figures such as means, variances, and standard deviations. "
+                            "Provide the numbers in a comma-separated format: "
+                            f"{ground_truth}"
+                        )
+                    }
+                ]
+                response = self.openai_client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=20,
+                    temperature=0,
+                )
+                extracted_value = response.choices[0].message.content.strip()
+                return extracted_value
