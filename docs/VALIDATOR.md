@@ -122,7 +122,6 @@ Using Together AI and Open AI simplifies setup and reduces local resource requir
    ```
 
 3. **Start the Validator**
-| You must run at least 2 models in any combination of 3
    ```bash
    pm2 start python --name "sn35-validator" -- neurons/validator/validator.py \
      --netuid 35 \
@@ -130,25 +129,10 @@ Using Together AI and Open AI simplifies setup and reduces local resource requir
      --wallet.hotkey "your-hotkey-name" \
      --subtensor.network finney \
      --llm_client.base_urls "http://localhost:8000/v1,https://api.openai.com/v1,https://api.together.xyz/v1" \
-     --llm_client.models "Qwen/Qwen2.5-7B-Instruct,gpt-4o-mini,meta-llama/Llama-3.3-70B-Instruct-Turbo" \
+     --llm_client.models "Qwen/Qwen2.5-7B-Instruct,gpt-4o-mini,meta-llama/Llama-2-7b-chat-hf" \
      --neuron_type validator \
      --logging.debug
    ```
-   Replace the placeholders with actual values just like the example.
-   - "vllm_base_url" with `http://localhost:8000/v1`.
-   - "openai_base_url" with `https://api.openai.com/v1`.
-   - "together_base_url" with `https://api.together.xyz/v1`.
-   - "vllm_model" with `Qwen/Qwen2.5-7B-Instruct`.
-   - "openai_model" with `gpt-4o-mini`.
-   - "together_model" with `meta-llama/Llama-3.3-70B-Instruct-Turbo`.
-   - in the base_urls and models, if you choose to not run 1 of the following endpoint, you can add `null` to ignore that endpoint
-       | example:
-        ```
-        --llm_client.base_urls "http://localhost:8000/v1,https://api.openai.com/v1,null" \
-        --llm_client.models "Qwen/Qwen2.5-7B-Instruct,gpt-4o-mini,null"
-        ```
-   
-   *If you want to run either Together AI or Open AI, you can set the other to 'null'.*
 
 4. **Enable Public Access (Optional)**
    Add this flag to enable proxy:
