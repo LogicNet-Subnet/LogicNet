@@ -1,6 +1,7 @@
 import torch
 import openai
 import sympy
+import random
 import bittensor as bt
 from concurrent import futures
 from logicnet.protocol import LogicSynapse
@@ -183,13 +184,14 @@ class LogicRewarder:
 
         ## check trick case
         try:
+            strings = ['a', 'b', 'c', 'd', 'e'] ## add to response to avoid gpt cached the output
             response_str = openai_client.chat.completions.create(
                 model=model_name,
                 messages=[
                     {
                         "role": "user",
                         "content": DETECT_TRICK_TEMPLATE.format(
-                            response=response
+                            response=str(random.choice(strings)) + response + str(random.choice(strings))
                         ),
                     },
                 ],

@@ -4,6 +4,7 @@ import random
 import re
 import uuid
 from logicnet.protocol import LogicSynapse
+from logicnet.validator.prompt import REPRHASE_CODE_TASK_TEMPLATE
 import bittensor as bt
 from .human_noise import get_condition
 from .math_generator.topics import TOPICS as topics
@@ -109,14 +110,23 @@ class LogicChallenger:
             # Select an atom question and answer from the UltraInteract
             elif selected_resource == 'ultrainteract':
                 ds = load_dataset("openbmb/UltraInteract_sft")
-                bt.logging.debug("Generating problem using UltraInteract dataset.")
-                data_set = ds['train']
-                bt.logging.info(f"Loaded UltraInteract dataset with {len(data_set['instruction'])} entries")
-                random_index = random.randint(0, len(data_set['instruction']) - 1)
-                instruction = data_set['instruction'][random_index]
-                response = data_set['response'][random_index]
+                bt.logging.debug(
+                    "Generating problem using UltraInteract dataset."
+                )
+                data_set = ds["train"]
+                data_set = data_set.filter(
+                    lambda x: "python" in x["instruction"].lower()
+                )
+                bt.logging.info(
+                    f"Loaded UltraInteract dataset with {len(data_set['instruction'])} entries"
+                )
+                random_index = random.randint(
+                    0, len(data_set["instruction"]) - 1
+                )
+                instruction = data_set["instruction"][random_index]
+                response = data_set["response"][random_index]
                 # atom_question = f"Find the solution of this instruction:\n---\n{instruction}\n---\n"
-                atom_question = f"This is an gen-code problem (Python), please give step by step solution and python code for the following instruction:\n---\n{instruction}\n---\n"
+                atom_question = f"This is an gen-code task in Python, Your have to find out solution and code python to solve the task. Please give step by step solution and python code for the following instruction:\n---\n{instruction}\n---\n. Give solution in a step by step and the python code."
                 atom_answer = response
             
             # Select an atom question and answer from the GSM8K
@@ -176,38 +186,33 @@ class LogicChallenger:
         # prompt = "Please paraphrase by adding word or expression to this question as if you were a {profile} who is {mood} and write in a {tone} tone. You can use incorrect grammar, typo or add more context! Don't add your solution! Just say the revised version, you don't need to be polite.".format(
         #     **conditions
         # )
-        
-        prompt = (
-            "As a {profile} who is feeling {mood}, please rephrase the following problem "
-            "in a {tone} tone. Write it as you would naturally ask the question. "
-            "Do not include the solution or add unnecessary context."
-        ).format(**conditions)
-        
-        
-        # messages = [
-        #     {
-        #         "role": "user",
-        #         "content": "Generate a math problem that required logic to solve.",
-        #     },
-        #     {"role": "assistant", "content": math_problem},
-        #     {
-        #         "role": "user",
-        #         "content": prompt,
-        #     },
-        # ]
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are simulating various human personas asking problems. "
-                    "Rephrase the following problem as the specified persona, "
-                    "ensuring the question sounds natural and appropriate for that individual."
-                ),
-            },
-            {"role": "assistant", "content": logic_question},
-            {"role": "user", "content": prompt},
-        ]
+
+        if "python" in logic_question.lower() or "gen-code" in logic_question.lower():
+            messages = [
+                {
+                    "role": "system",
+                    "content": REPRHASE_CODE_TASK_TEMPLATE.format(question=logic_question),
+                },
+            ]
+        else:
+            prompt = (
+                "As a {profile} who is feeling {mood}, please rephrase the following problem "
+                "in a {tone} tone. Write it as you would naturally ask the question. "
+                "Do not include the solution or add unnecessary context."
+            ).format(**conditions)
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are simulating various human personas asking problems. "
+                        "Rephrase the following problem as the specified persona, "
+                        "ensuring the question sounds natural and appropriate for that individual."
+                    ),
+                },
+                {"role": "assistant", "content": logic_question},
+                {"role": "user", "content": prompt},
+            ]
 
         max_attempts = 3
 
