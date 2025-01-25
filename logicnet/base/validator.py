@@ -25,9 +25,8 @@ class BaseValidatorNeuron(BaseNeuron):
         self.dendrite = bt.dendrite(wallet=self.wallet)
         bt.logging.info(f"\033[1;32m🔗 Dendrite: {self.dendrite}\033[0m")
 
-        # Set up initial scoring weights for validation
-        bt.logging.info("\033[1;32m⚖️ Building validation weights.\033[0m")
-        self.scores = torch.zeros_like(self.metagraph.S.clone().detach(), dtype=torch.float32)
+        # Get scores using Metagraph
+        self.scores = torch.zeros((self.metagraph.n)).to(self.device)
 
         # Init sync with the network. Updates the metagraph.
         self.resync_metagraph()
