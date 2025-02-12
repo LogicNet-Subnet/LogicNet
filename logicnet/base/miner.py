@@ -69,7 +69,7 @@ class BaseMinerNeuron(BaseNeuron):
         )
         self.axon.serve(netuid=self.config.netuid, subtensor=self.subtensor)
 
-        # Start  starts the miner's axon, making it active on the network.
+        # Start starts the miner's axon, making it active on the network.
         self.axon.start()
 
         bt.logging.info(f"\033[1;32m🧠 Miner starting at block: {self.block}\033[0m")

@@ -6,6 +6,7 @@ import bittensor as bt
 from concurrent import futures
 from logicnet.protocol import LogicSynapse
 from sentence_transformers import SentenceTransformer
+from rapidfuzz import fuzz
 from logicnet.utils.model_selector import model_selector
 from logicnet.utils.regex_helper import extract_numerical_part
 from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE
@@ -17,20 +18,23 @@ PROCESSING_TIME_WEIGHT = -0.1
 
 
 class LogicRewarder:
-    def __init__(self, model_rotation_pool: dict):
+    def __init__(self, model_rotation_pool: dict, penalty_threshold: float):
         """
         READ HERE TO LEARN HOW VALIDATOR REWARD THE MINER
         """
         self.model_rotation_pool = model_rotation_pool
         self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        self.penalty_threshold = penalty_threshold
 
-    def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse):
-        """Calculate reward for each response using similarity, correctness, and processing time.
+    def __call__(self, reward_uids, reward_responses: list[LogicSynapse], non_reward_responses: list[LogicSynapse], base_synapse: LogicSynapse):
+        """
+        Calculate reward for each response using similarity, correctness, and processing time.
+        This method also apply a penalty to reponses that have high similarity to other responses in the same batch, which imply they are copying each other.
 
         Args:
-            task_uid (int): Unique task UID.
-            uids (list[int]): List of miner UIDs.
-            responses (list[LogicSynapse]): Synapse responses from miners.
+            reward_uids (list[int]): List of miner UIDs to be rewarded.
+            reward_responses (list[LogicSynapse]): Synapse responses from miners to be rewarded.
+            non_reward_responses (list[LogicSynapse]): Synapse responses from miners to be penalized.
             base_synapse (LogicSynapse): Base synapse containing the ground truth and raw logic question.
 
         Returns:
@@ -39,59 +43,71 @@ class LogicRewarder:
         # Get the unique task UID from the base_synapse
         task_uid = base_synapse.task_uid
 
-        valid_uids = [
-            uid for uid, response in zip(uids, responses) if response.is_success
+        valid_reward_uids = [
+            uid for uid, response in zip(reward_uids, reward_responses) if response.is_success
         ]
-        valid_responses = [response for response in responses if response.is_success]
-        invalid_uids = [
-            uid for uid, response in zip(uids, responses) if not response.is_success
+        valid_reward_responses = [response for response in reward_responses if response.is_success]
+        valid_non_reward_responses = [response for response in non_reward_responses if response.is_success]
+        invalid_reward_uids = [
+            uid for uid, response in zip(reward_uids, reward_responses) if not response.is_success
         ]
-        invalid_rewards = [0 for _ in invalid_uids]
+        invalid_rewards = [0 for _ in invalid_reward_uids]
         reward_logs = []
         valid_rewards = []
 
-        if valid_uids:
+        if valid_reward_uids:
             ref_ground_truth: str = self._get_ground_truth(
                 base_synapse.raw_logic_question
             )
-            response_texts = [response.logic_reasoning for response in valid_responses]
-            similarities = self._get_similarity(ref_ground_truth, response_texts)
-            correctness = self._get_correctness(base_synapse, valid_responses)
+            reward_response_texts = [response.logic_reasoning for response in valid_reward_responses]
+            non_reward_response_texts = [response.logic_reasoning for response in valid_non_reward_responses]
+
+            similarities = self._get_similarity(ref_ground_truth, reward_response_texts)
+            correctness = self._get_correctness(base_synapse, valid_reward_responses)
+            penalties = self._get_penalties(reward_response_texts, non_reward_response_texts)
             process_times = [
-                response.dendrite.process_time for response in valid_responses
+                response.dendrite.process_time for response in valid_reward_responses
             ]
             timeout = base_synapse.timeout
 
-            for i in range(len(valid_responses)):
+            for i in range(len(valid_reward_responses)):
                 reward = (
                     SIMILARITY_WEIGHT * similarities[i]
                     + CORRECTNESS_WEIGHT * correctness[i]
                     + PROCESSING_TIME_WEIGHT * min(process_times[i] / timeout, 1)
                 )
-                reward_info = {
-                    "task_uid": task_uid,  # Include the task_uid in the reward log
-                    "similarity": similarities[i],
-                    "correctness": correctness[i],
-                    "process_time": process_times[i],
-                }
-                reward_logs.append(reward_info)
 
                 # Scale up the reward
                 reward = reward / 2 + 0.5
+
+                # Apply penalty to the reward
+                if penalties[i] > self.penalty_threshold:
+                    reward = reward * (1 - penalties[i])
+
                 bt.logging.debug(
                     f"[REWARDER][{task_uid}] similarity: {similarities[i]}, correctness: {correctness[i]}, process_time: {process_times[i]}, final_reward: {reward}"
                 )
                 valid_rewards.append(reward)
 
-        total_uids = valid_uids + invalid_uids
+                reward_info = {
+                    "task_uid": task_uid,  # Include the task_uid in the reward log
+                    "similarity": similarities[i],
+                    "correctness": correctness[i],
+                    "process_time": process_times[i],
+                    "penalty": penalties[i],
+                }
+                reward_logs.append(reward_info)
+
+        total_uids = valid_reward_uids + invalid_reward_uids
         rewards = valid_rewards + invalid_rewards
 
-        for invalid_uid in invalid_uids:
+        for invalid_uid in invalid_reward_uids:
             reward_logs.append({
                 "task_uid": task_uid,
                 "similarity": 0,
                 "correctness": 0,
                 "process_time": 0,
+                "penalty": 0,
             })
         return total_uids, rewards, reward_logs
 
@@ -330,6 +346,49 @@ class LogicRewarder:
         except Exception as e:
             bt.logging.warning(f"Failed to calculate similarity.\nError: {e}")
             return [0.5] * len(responses)
+        
+    def _get_penalties(self, reward_responses_texts: list[str], non_reward_responses_texts: list[str]):
+        """Calculate penalties for each response.
+        Penalty is calculated based on the similarity between the response and the other responses using embedding similarity and Levenshtein distance.
+        
+        Args:
+            reward_responses_texts (list[str]): List of responses from miners to be rewarded.
+            non_reward_responses_texts (list[str]): List of responses from miners to be penalized.
+
+        Returns:
+            list[float]: List of penalties for each response, 0 if the response is not penalized, 1 if the response is highly penalized.
+        """
+        penalties = []
+        try:
+            all_responses = reward_responses_texts + non_reward_responses_texts
+            
+            # Calculate embedding similarity
+            embeddings = self.embedder.encode(all_responses)
+            normalized_embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+            embedding_similarity_matrix = torch.matmul(normalized_embeddings, normalized_embeddings.T)
+            # We don't want to penalize the response with itself
+            embedding_similarity_matrix = embedding_similarity_matrix - torch.eye(embedding_similarity_matrix.shape[0])
+            reward_responses_embedding_similarity = embedding_similarity_matrix[:len(reward_responses_texts)].max(dim=1).values # consider the max similarity for each reward response
+            reward_responses_embedding_similarity = (reward_responses_embedding_similarity + 1) / 2
+
+            # Calculate Levenshtein distance
+            levenshtein_similarity_matrix = torch.zeros((len(all_responses), len(all_responses)))
+            for i in range(len(all_responses)):
+                for j in range(len(all_responses)):
+                    if i != j:
+                        levenshtein_similarity_matrix[i, j] = fuzz.partial_ratio(all_responses[i], all_responses[j]) / 100
+                    else:
+                        levenshtein_similarity_matrix[i, j] = 0
+
+            reward_responses_levenshtein_similarity = levenshtein_similarity_matrix[:len(reward_responses_texts)].max(dim=1).values # consider the max similarity for each reward response
+            
+            penalties = (reward_responses_embedding_similarity + reward_responses_levenshtein_similarity) / 2
+            penalties = penalties.clip(0, 1)
+            return penalties.tolist()
+
+        except Exception as e:
+            bt.logging.warning(f"Failed to calculate penalties.\nError: {e}")
+            return [0.0] * len(reward_responses_texts)
 
     def _get_ground_truth(self, question: str):
         """Generate self-generated ground truth based on the question.

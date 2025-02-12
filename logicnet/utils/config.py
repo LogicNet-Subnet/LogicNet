@@ -127,10 +127,17 @@ def add_args(cls, parser):
         )
 
         parser.add_argument(
+            "--max_workers",
+            type=int,
+            help="The maximum number of workers to run in a single loop.",
+            default=32,
+        )
+
+        parser.add_argument(
             "--async_batch_size",
             type=int,
-            help="The number of threads to run in a single loop.",
-            default=16,
+            help="Validator query batch size.",
+            default=32,
         )
 
         parser.add_argument(

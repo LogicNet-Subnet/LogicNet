@@ -10,7 +10,10 @@ import traceback
 import torch
 import requests
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import bittensor as bt
+
 import logicnet as ln
 from neurons.validator.validator_proxy import ValidatorProxy
 from logicnet.base.validator import BaseValidatorNeuron
@@ -19,13 +22,13 @@ from logicnet.utils.wandb_manager import WandbManager
 from neurons.validator.core.serving_queue import QueryQueue
 
 
-def init_category(config=None, model_rotation_pool=None, dataset_weight=None):
+def init_category(config=None, model_rotation_pool=None, dataset_weight=None, penalty_threshold=None):
     category = {
         "Logic": {
             "synapse_type": ln.protocol.LogicSynapse,
             "incentive_weight": 1.0,
             "challenger": LogicChallenger(model_rotation_pool, dataset_weight),
-            "rewarder": LogicRewarder(model_rotation_pool),
+            "rewarder": LogicRewarder(model_rotation_pool, penalty_threshold),
             "timeout": 64,
         }
     }
@@ -138,6 +141,9 @@ class Validator(BaseValidatorNeuron):
                     + "\033[0m"
                 )
 
+        # Initialize ThreadPoolExecutor
+        self.worker_thread_pool = ThreadPoolExecutor(max_workers=self.config.max_workers)
+
     def forward(self):
         """
         Query miners by batched from the serving queue then process challenge-generating -> querying -> rewarding in background by threads
@@ -165,6 +171,7 @@ class Validator(BaseValidatorNeuron):
                 self.wandb_manager.init_wandb()
 
         # Query and reward
+        futures_with_metadata = []
         for (
             category,
             uids,
@@ -175,21 +182,26 @@ class Validator(BaseValidatorNeuron):
                 f"\033[1;34m🔍 Querying {len(uids)} uids for model {category}, sleep_per_batch: {sleep_per_batch}\033[0m"
             )
 
-            thread = threading.Thread(
-                target=self.async_query_and_reward,
-                args=(category, uids, should_rewards),
-            )
-            threads.append(thread)
-            thread.start()
+            future = self.worker_thread_pool.submit(
+                self.async_query_and_reward, 
+                category, 
+                uids, 
+                should_rewards
+            ) 
+            futures_with_metadata.append((future, category, uids, should_rewards))
 
             bt.logging.info(
                 f"\033[1;34m😴 Sleeping for {sleep_per_batch} seconds between batches\033[0m"
             )
             time.sleep(sleep_per_batch)
-        
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
+
+        # Wait for all submitted tasks to complete
+        for future, category, uids, should_rewards in as_completed(futures_with_metadata):
+            try:
+                future.result()
+            except Exception as exc:
+                # Get the args that were passed to the failed task
+                bt.logging.warning(f"\033[1;33m⚠️ Task failed with error: {exc}\nFuture: {future}\nCategory: {category}\nUids: {uids}\nShould rewards: {should_rewards}\033[0m")
 
         # Assign incentive rewards
         self.assign_incentive_rewards(self.miner_uids, self.miner_scores, self.miner_reward_logs)
@@ -245,6 +257,11 @@ class Validator(BaseValidatorNeuron):
             reward_uids = [
                 uid for uid, should_reward in zip(uids, should_rewards) if should_reward
             ]
+            non_reward_responses = [
+                response
+                for response, should_reward in zip(responses, should_rewards)
+                if not should_reward
+            ]
 
             bt.logging.info(
                 f"\033[1;34m🔍 Received {len(responses)} responses, {len(reward_responses)} to be rewarded\033[0m"
@@ -252,7 +269,7 @@ class Validator(BaseValidatorNeuron):
 
             if reward_uids:
                 uids, rewards, reward_logs = self.categories[category]["rewarder"](
-                    reward_uids, reward_responses, base_synapse
+                    reward_uids, reward_responses, non_reward_responses, base_synapse
                 )
 
                 for i, uid in enumerate(reward_uids):
