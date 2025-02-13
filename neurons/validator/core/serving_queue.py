@@ -85,7 +85,7 @@ class QueryQueue:
 
             # Calculate progress through queue (0.0 to 1.0)
             progress = 1 - (self.total_uids_remaining / max(initial_total, 1))
-            time_to_sleep = self.time_per_loop * min(batch_size / (self.total_uids_remaining + 1), 1) * math.exp(progress) 
+            time_to_sleep = self.time_per_loop * min(batch_size / (initial_total + 1), 1) * math.exp(progress) 
 
             uids_to_query = []
             should_rewards = []

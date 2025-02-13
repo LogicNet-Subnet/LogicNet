@@ -205,6 +205,13 @@ def add_args(cls, parser):
             default="40,20,0,10,10,10,10",
         )
 
+        parser.add_argument(
+            "--penalty_threshold",
+            type=float,
+            help="The similarity threshold for penalty",
+            default=0.8,
+        )
+
     else:
         parser.add_argument(
             "--miner.category",

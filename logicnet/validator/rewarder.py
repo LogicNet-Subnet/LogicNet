@@ -330,19 +330,16 @@ class LogicRewarder:
             list[float]: List of similarity scores for each response.
         """
         try:
-            ground_truth_embedding = self.embedder.encode(ground_truth)
-            response_embeddings = self.embedder.encode(responses)
+            ground_truth_embedding = self.embedder.encode(ground_truth, convert_to_tensor=True).cpu()
+            response_embeddings = self.embedder.encode(responses, convert_to_tensor=True).cpu()
 
             # Calculate similarity
-            similarities = []
-            for response_embedding in response_embeddings:
-                similarity = torch.nn.functional.cosine_similarity(
-                    torch.tensor(ground_truth_embedding),
-                    torch.tensor(response_embedding),
-                    dim=0,
-                )
-                similarities.append(similarity.item())
-            return similarities
+            similarities = torch.nn.functional.cosine_similarity(
+                ground_truth_embedding,
+                response_embeddings,
+                dim=1,
+            )
+            return similarities.tolist()
         except Exception as e:
             bt.logging.warning(f"Failed to calculate similarity.\nError: {e}")
             return [0.5] * len(responses)
@@ -363,7 +360,7 @@ class LogicRewarder:
             all_responses = reward_responses_texts + non_reward_responses_texts
             
             # Calculate embedding similarity
-            embeddings = self.embedder.encode(all_responses)
+            embeddings = self.embedder.encode(all_responses, convert_to_tensor=True).cpu()
             normalized_embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
             embedding_similarity_matrix = torch.matmul(normalized_embeddings, normalized_embeddings.T)
             # We don't want to penalize the response with itself
@@ -384,7 +381,8 @@ class LogicRewarder:
             
             penalties = (reward_responses_embedding_similarity + reward_responses_levenshtein_similarity) / 2
             penalties = penalties.clip(0, 1)
-            return penalties.tolist()
+            penalties = [float(penalty) for penalty in penalties.tolist()]
+            return penalties
 
         except Exception as e:
             bt.logging.warning(f"Failed to calculate penalties.\nError: {e}")

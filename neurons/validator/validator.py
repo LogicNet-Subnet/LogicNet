@@ -116,7 +116,7 @@ class Validator(BaseValidatorNeuron):
         }
         bt.logging.info(f"Model rotation pool without keys: {model_rotation_pool_without_keys}")
 
-        self.categories = init_category(self.config, self.model_rotation_pool, self.config.dataset_weight)
+        self.categories = init_category(self.config, self.model_rotation_pool, self.config.dataset_weight, self.config.penalty_threshold)
         self.miner_manager = MinerManager(self)
         self.load_state()
         self.update_scores_on_chain()
