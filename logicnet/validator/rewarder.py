@@ -2,6 +2,7 @@ import torch
 import openai
 import sympy
 import random
+import time
 import bittensor as bt
 from concurrent import futures
 from logicnet.protocol import LogicSynapse
@@ -9,11 +10,16 @@ from sentence_transformers import SentenceTransformer
 from logicnet.utils.model_selector import model_selector
 from logicnet.utils.regex_helper import extract_numbers
 from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE, EXTRACT_ANSWER_PROMPT
+from logicnet.utils.func_helper import linear_function
 
 SIMILARITY_WEIGHT = 0.3
 CORRECTNESS_WEIGHT = 0.7
 PROCESSING_TIME_WEIGHT = -0.05
-
+ELIGIBLE_TIMEOUT = 604800 # 7 days
+class MinerInfo:
+    def __init__(self, uid: int, time: float):
+        self.uid = uid
+        self.time = time
 
 
 class LogicRewarder:
@@ -204,7 +210,6 @@ class LogicRewarder:
             response = response.replace(char, ' ')
         return response
     
-
     def _get_correctness_by_llm(self, question: str, ground_truth: str, response: str, model_name: str, openai_client: openai.OpenAI):
         """Calculate the correctness score for a single response using LLM.
 
@@ -431,3 +436,14 @@ class LogicRewarder:
                             bt.logging.error(f"API request failed after switching: {e}")
 
         return response
+    
+    def bonus_rewarder(self, miner_uids:list[str], new_miners: list[MinerInfo], rewards: list[float]):
+        """Reward new miners with a bonus.
+        """
+        for miner_uid, index in miner_uids:
+            for miner_info in new_miners:
+                if miner_info.uid in miner_uid:
+                    rewards[index] += linear_function( 1 - (time.time() - miner_info.time)/ELIGIBLE_TIMEOUT, m=0.1*rewards[index])
+                    bt.logging.info(f"Bonus reward for new miner {miner_uid}: {rewards[index]}")
+        return rewards
+    
