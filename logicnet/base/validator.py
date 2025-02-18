@@ -2,13 +2,14 @@ import copy
 import torch
 import asyncio
 import threading
+import time
 import bittensor as bt
 
 from typing import List
 from traceback import print_exception
-
 from logicnet.base.neuron import BaseNeuron
 
+ELIGIBLE_TIMEOUT = 604800 # 7 days
 
 class BaseValidatorNeuron(BaseNeuron):
     """
@@ -20,6 +21,9 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # Save a copy of the hotkeys to local memory.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
+
+        # Save a copy of the new hotkeys to local memory.
+        self.new_hotkeys = []
 
         # Dendrite lets us send messages to other nodes (axons) in the network.
         self.dendrite = bt.dendrite(wallet=self.wallet)
@@ -251,10 +255,22 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.info(
             "\033[1;32m🔄 Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages\033[0m"
         )
-        # Zero out all hotkeys that have been replaced.
+
+        # Zero out all hotkeys that have been replaced and add them to the new hotkeys list.
         for uid, hotkey in enumerate(self.hotkeys):
             if (hotkey != self.metagraph.hotkeys[uid]):
                 self.scores[uid] = 0  # hotkey has been replaced
+                self.new_hotkeys.append(
+                    {
+                        uid: self.metagraph.hotkeys[uid],
+                        time: time.time(),
+                    }
+                )
+
+        # Remove any new hotkeys that have not been eligible.
+        for uid, hotkey in enumerate(self.new_hotkeys):
+            if (time.time() - hotkey["time"]) > ELIGIBLE_TIMEOUT:
+                self.new_hotkeys.pop(uid)
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
