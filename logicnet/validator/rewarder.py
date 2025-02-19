@@ -447,50 +447,46 @@ class LogicRewarder:
         return response
     
     def bonus_rewarder(self, available_miner_uids: list[int], eligible_new_miners: list[MinerInfo], rewards: list[float]):
-        """Reward new miners with a bonus.
+        """Reward new miners with a bonus based on their registration time.
 
         Args:
-            available_miner_uids (list[str]): List of miner UIDs.
+            available_miner_uids (list[int]): List of miner UIDs that are currently active.
             eligible_new_miners (list[MinerInfo]): List of MinerInfo objects containing miner UIDs and registration times.
-            rewards (list[float]): List of rewards to be modified with bonuses.
+            rewards (list[float]): List of base rewards to be modified with bonuses.
 
         Returns:
-            list[float]: Modified rewards list with bonuses applied to new miners.
+            list[float]: Modified rewards list with time-based bonuses applied to eligible new miners.
         """
         if not available_miner_uids:
             bt.logging.info("No available miners")
             return rewards
-        
-        # Convert eligible_new_miners to a dictionary for quick lookup
-        new_miners_dict = {miner.uid: miner.time for miner in eligible_new_miners}
-        bt.logging.info(f"New miners eligible: {new_miners_dict} " 
-                        f"Available miners: {available_miner_uids}")
 
-        # Iterate through miner UIDs and their corresponding indices
+        new_miners_dict = {int(miner.uid): miner.time for miner in eligible_new_miners}
+        current_time = time.time()
+
+        bt.logging.debug(f"Processing bonus rewards - Eligible new miners: {new_miners_dict}")
+        bt.logging.debug(f"Available miner UIDs: {available_miner_uids}")
+
+        # Process each miner exactly once with direct dictionary lookup
         for idx, miner_uid in enumerate(available_miner_uids):
-            # Check if the miner is in the new miners dictionary
-            for new_miner_uid in new_miners_dict.keys():
-                if miner_uid == int(new_miner_uid):
-                    # Use new_miner_uid (string) instead of miner_uid (int) to access the dictionary
-                    miner_time = new_miners_dict[new_miner_uid]  # <- Fix is here
-                    current_time = time.time()
-                    time_factor = 1 - (current_time - miner_time) / ELIGIBLE_TIMEOUT
+            if miner_uid in new_miners_dict:
+                miner_time = new_miners_dict[miner_uid]
+                time_factor = 1 - (current_time - miner_time) / ELIGIBLE_TIMEOUT
+                
+                if time_factor > 0:
+                    original_reward = rewards[idx]
+                    # Calculate bonus as a percentage of original reward, scaled by time factor
+                    bonus = linear_function(time_factor, m=0.1 * original_reward)
+                    rewards[idx] = min(original_reward + bonus, 1.0)
                     
-                    # Only apply bonus if within eligible timeframe
-                    if time_factor > 0:
-                        original_reward = rewards[idx]
-                        # Apply bonus using linear function and min to ensure reward is within [0, 1]
-                        bonus = linear_function(time_factor, m=0.1 * original_reward)
-                        rewards[idx] += bonus
-                        rewards[idx] = min(rewards[idx], 1.0)
-                        bt.logging.info(
-                            f"Applied bonus for new miner {miner_uid}: "
-                            f"new incentive = {rewards[idx]:.4f} (was {original_reward:.4f}, "
-                            f"bonus = {bonus:.4f})"
-                        )
-                    else:
-                        bt.logging.info(f"Miner {miner_uid} is no longer eligible for bonus rewards")
+                    bt.logging.info(
+                        f"Bonus applied to miner {miner_uid}: "
+                        f"final incentive = {rewards[idx]:.4f} "
+                        f"(original = {original_reward:.4f}, bonus = {bonus:.4f}, "
+                        f"time_factor = {time_factor:.2f})"
+                    )
                 else:
-                    bt.logging.debug(f"Miner {miner_uid} is not eligible for bonus rewards")
+                    bt.logging.debug(f"Miner {miner_uid} bonus period expired "
+                                f"(registered {(current_time - miner_time) / 86400:.1f} days ago)")
 
         return rewards
