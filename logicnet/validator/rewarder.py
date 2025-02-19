@@ -16,8 +16,10 @@ SIMILARITY_WEIGHT = 0.3
 CORRECTNESS_WEIGHT = 0.7
 PROCESSING_TIME_WEIGHT = -0.05
 ELIGIBLE_TIMEOUT = 604800 # 7 days
+
+
 class MinerInfo:
-    def __init__(self, uid: int, time: float):
+    def __init__(self, uid: str, time: float):
         self.uid = uid
         self.time = time
 
@@ -30,7 +32,7 @@ class LogicRewarder:
         self.model_rotation_pool = model_rotation_pool
         self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-    def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse):
+    def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse, new_miners: list[MinerInfo]):
         """Calculate reward for each response using similarity, correctness, and processing time.
 
         Args:
@@ -74,7 +76,7 @@ class LogicRewarder:
                     + CORRECTNESS_WEIGHT * correctness[i]
                     + PROCESSING_TIME_WEIGHT * min(process_times[i] / timeout, 1)
                 )
-        
+
                 # Scale up the reward
                 reward = reward / 2 + 0.5
                 valid_rewards.append(reward)
@@ -99,8 +101,15 @@ class LogicRewarder:
                     
                 except Exception as e:
                     bt.logging.error(f"Error in logging reward for valid miners: {e}")
-
-
+                    
+        # Bonus reward for new miners
+        if not new_miners:
+            bt.logging.info("No new miners within the eligible timeframe")
+        else:
+            # Convert new_miners from list of dicts to list of MinerInfo objects
+            new_miners = [MinerInfo(uid=miner['uid'], time=miner['time']) for miner in new_miners]
+            valid_rewards = self.bonus_rewarder(valid_uids, new_miners, valid_rewards)
+        
         total_uids = valid_uids + invalid_uids
         rewards = valid_rewards + invalid_rewards
 
@@ -437,13 +446,51 @@ class LogicRewarder:
 
         return response
     
-    def bonus_rewarder(self, miner_uids:list[str], new_miners: list[MinerInfo], rewards: list[float]):
+    def bonus_rewarder(self, available_miner_uids: list[int], eligible_new_miners: list[MinerInfo], rewards: list[float]):
         """Reward new miners with a bonus.
+
+        Args:
+            available_miner_uids (list[str]): List of miner UIDs.
+            eligible_new_miners (list[MinerInfo]): List of MinerInfo objects containing miner UIDs and registration times.
+            rewards (list[float]): List of rewards to be modified with bonuses.
+
+        Returns:
+            list[float]: Modified rewards list with bonuses applied to new miners.
         """
-        for miner_uid, index in miner_uids:
-            for miner_info in new_miners:
-                if miner_info.uid in miner_uid:
-                    rewards[index] += linear_function( 1 - (time.time() - miner_info.time)/ELIGIBLE_TIMEOUT, m=0.1*rewards[index])
-                    bt.logging.info(f"Bonus reward for new miner {miner_uid}: {rewards[index]}")
+        if not available_miner_uids:
+            bt.logging.info("No available miners")
+            return rewards
+        
+        # Convert eligible_new_miners to a dictionary for quick lookup
+        new_miners_dict = {miner.uid: miner.time for miner in eligible_new_miners}
+        bt.logging.info(f"New miners eligible: {new_miners_dict} " 
+                        f"Available miners: {available_miner_uids}")
+
+        # Iterate through miner UIDs and their corresponding indices
+        for idx, miner_uid in enumerate(available_miner_uids):
+            # Check if the miner is in the new miners dictionary
+            for new_miner_uid in new_miners_dict.keys():
+                if miner_uid == int(new_miner_uid):
+                    # Use new_miner_uid (string) instead of miner_uid (int) to access the dictionary
+                    miner_time = new_miners_dict[new_miner_uid]  # <- Fix is here
+                    current_time = time.time()
+                    time_factor = 1 - (current_time - miner_time) / ELIGIBLE_TIMEOUT
+                    
+                    # Only apply bonus if within eligible timeframe
+                    if time_factor > 0:
+                        original_reward = rewards[idx]
+                        # Apply bonus using linear function and min to ensure reward is within [0, 1]
+                        bonus = linear_function(time_factor, m=0.1 * original_reward)
+                        rewards[idx] += bonus
+                        rewards[idx] = min(rewards[idx], 1.0)
+                        bt.logging.info(
+                            f"Applied bonus for new miner {miner_uid}: "
+                            f"new incentive = {rewards[idx]:.4f} (was {original_reward:.4f}, "
+                            f"bonus = {bonus:.4f})"
+                        )
+                    else:
+                        bt.logging.info(f"Miner {miner_uid} is no longer eligible for bonus rewards")
+                else:
+                    bt.logging.debug(f"Miner {miner_uid} is not eligible for bonus rewards")
+
         return rewards
-    
