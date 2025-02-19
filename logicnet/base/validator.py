@@ -9,7 +9,7 @@ from typing import List
 from traceback import print_exception
 from logicnet.base.neuron import BaseNeuron
 
-ELIGIBLE_TIMEOUT = 604800 # 7 days
+
 
 class BaseValidatorNeuron(BaseNeuron):
     """
@@ -258,19 +258,8 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # Zero out all hotkeys that have been replaced and add them to the new hotkeys list.
         for uid, hotkey in enumerate(self.hotkeys):
-            if (hotkey != self.metagraph.hotkeys[uid]):
+            if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
-                self.new_hotkeys.append(
-                    {
-                        uid: self.metagraph.hotkeys[uid],
-                        time: time.time(),
-                    }
-                )
-
-        # Remove any new hotkeys that have not been eligible.
-        for uid, hotkey in enumerate(self.new_hotkeys):
-            if (time.time() - hotkey["time"]) > ELIGIBLE_TIMEOUT:
-                self.new_hotkeys.pop(uid)
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
