@@ -24,6 +24,9 @@ from logicnet.protocol import LogicSynapse
 from neurons.validator.core.serving_queue import QueryQueue
 from collections import defaultdict
 import wandb
+from bittensor import Subtensor
+
+ELIGIBLE_TIMEOUT = 604800 # 7 days
 
 
 def init_category(config=None, model_rotation_pool=None, dataset_weight=None):
@@ -150,6 +153,7 @@ class Validator(BaseValidatorNeuron):
         Query miners by batched from the serving queue then process challenge-generating -> querying -> rewarding in background by threads
         DEFAULT: 16 miners per batch, 600 seconds per loop.
         """
+        self.sync()
         self.store_miner_infomation()
         bt.logging.info("\033[1;34m🔄 Updating available models & uids\033[0m")
         async_batch_size = self.config.async_batch_size
@@ -214,7 +218,6 @@ class Validator(BaseValidatorNeuron):
             )
             time.sleep(loop_base_time - actual_time_taken)
 
-
     def async_query_and_reward(
         self,
         category: str,
@@ -256,9 +259,12 @@ class Validator(BaseValidatorNeuron):
                 uid for uid, should_reward in zip(uids, should_rewards) if should_reward
             ]
 
+            # Get new miners within the ELIGIBLE_TIMEOUT period
+            self.new_hotkeys = self.get_new_miners()
+
             if reward_uids:
                 uids, rewards, reward_logs = self.categories[category]["rewarder"](
-                    reward_uids, reward_responses, base_synapse
+                    reward_uids, reward_responses, base_synapse, self.new_hotkeys
                 )
 
                 for i, uid in enumerate(reward_uids):
@@ -434,6 +440,7 @@ class Validator(BaseValidatorNeuron):
             bt.logging.info("State successfully saved to state.pkl")
         except Exception as e:
             bt.logging.error(f"Failed to save state: {e}")
+    
     def load_state(self):
         """Loads state of  validator from a file, with fallback to .pt if .pkl is not found."""
         # TODO: After a transition period, remove support for the old .pt format.
@@ -474,7 +481,6 @@ class Validator(BaseValidatorNeuron):
         except Exception as e:
             self.step = 0  # Default fallback in case of an unknown error
             bt.logging.error(f"Error loading state: {e}")
-
 
     def store_miner_infomation(self):
         miner_informations = self.miner_manager.to_dict()
@@ -574,6 +580,65 @@ class Validator(BaseValidatorNeuron):
         except Exception as e:
             bt.logging.error(f"Error logging to wandb: {e}")
 
+    def get_new_miners(self):
+        """
+        Get newly registered miners within the ELIGIBLE_TIMEOUT period.
+        
+        Returns:
+            list: List of dicts containing new miner UIDs and their registration timestamps.
+                Format: [{'uid': int, 'time': float}, ...]
+        """
+        try:
+            # Get current block number from the chain
+            current_block_number = bt.subtensor().get_current_block()
+            
+            # Query registration blocks for all miners in netuid 78
+            netuid = 35
+            on_chain_data = []
+            new_miners = []
+
+            with Subtensor() as subtensor:
+                on_chain_data = subtensor.query_map('SubtensorModule', 'BlockAtRegistration', params=[netuid])
+
+                if not on_chain_data:
+                    bt.logging.warning(f"No registration data found for netuid {netuid}")
+                    return []
+
+                # Process registration data
+                miner_status = []
+                
+                # Get block numbers for all miners
+                for uid, block_number_ in on_chain_data:
+                    block_number = block_number_.value
+                    miner_status.append({
+                        'uid': uid, 
+                        'registered_block_number': block_number
+                    })
+
+                # Calculate age and filter recent miners
+                current_time = time.time()
+                for miner in miner_status:
+                    # Convert blocks to seconds (12 seconds per block)
+                    blocks_age = current_block_number - miner['registered_block_number']
+                    miner_age_seconds = blocks_age * 12
+                    if miner_age_seconds < ELIGIBLE_TIMEOUT:
+                        bt.logging.info(f"Miner {miner['uid']} registered {miner_age_seconds / 86400:.1f} days ago")
+                        registered_timestamp = current_time - miner_age_seconds
+                        new_miners.append({
+                            'uid': miner['uid'], 
+                            'time': registered_timestamp
+                        })
+
+                if not new_miners:
+                    bt.logging.debug(f"No new miners found within the last {ELIGIBLE_TIMEOUT / 86400:.1f} days")
+                else:
+                    bt.logging.info(f"Found {len(new_miners)} new miners within {ELIGIBLE_TIMEOUT / 86400:.1f} days")
+                
+            return new_miners
+
+        except Exception as e:
+            bt.logging.error(f"Error in get_new_miner: {str(e)}")
+            return []
 
 # The main function parses the configuration and runs the validator.
 if __name__ == "__main__":

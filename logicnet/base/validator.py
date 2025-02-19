@@ -2,12 +2,13 @@ import copy
 import torch
 import asyncio
 import threading
+import time
 import bittensor as bt
 
 from typing import List
 from traceback import print_exception
-
 from logicnet.base.neuron import BaseNeuron
+
 
 
 class BaseValidatorNeuron(BaseNeuron):
@@ -20,6 +21,9 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # Save a copy of the hotkeys to local memory.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
+
+        # Save a copy of the new hotkeys to local memory.
+        self.new_hotkeys = []
 
         # Dendrite lets us send messages to other nodes (axons) in the network.
         self.dendrite = bt.dendrite(wallet=self.wallet)
@@ -251,9 +255,10 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.info(
             "\033[1;32m🔄 Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages\033[0m"
         )
-        # Zero out all hotkeys that have been replaced.
+
+        # Zero out all hotkeys that have been replaced and add them to the new hotkeys list.
         for uid, hotkey in enumerate(self.hotkeys):
-            if (hotkey != self.metagraph.hotkeys[uid]):
+            if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
 
         # Check to see if the metagraph has changed size.

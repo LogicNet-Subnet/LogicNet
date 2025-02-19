@@ -60,10 +60,23 @@ class MinerManager:
     def __init__(self, validator):
         self.validator = validator
         self.all_uids = [int(uid.item()) for uid in self.validator.metagraph.uids]
+        # Ensure all entries are MinerInfo objects
         self.all_uids_info = {uid: MinerInfo() for uid in self.all_uids}
 
     def to_dict(self):
-        return {uid: info.to_dict() for uid, info in self.all_uids_info.items()}
+        """Convert miner info to dictionary format, ensuring all entries are MinerInfo objects"""
+        result = {}
+        for uid, info in self.all_uids_info.items():
+            if isinstance(info, dict):
+                # Convert dict to MinerInfo object if needed
+                info = MinerInfo(**info)
+                self.all_uids_info[uid] = info
+            elif not isinstance(info, MinerInfo):
+                # Create new MinerInfo object if invalid type
+                info = MinerInfo()
+                self.all_uids_info[uid] = info
+            result[uid] = info.to_dict()
+        return result
 
     def get_miner_info(self):
         """
@@ -101,10 +114,7 @@ class MinerManager:
             miner_distribution = {}
             for uid, info in valid_miners_info.items():
                 # info = self.all_uids_info[int(uid)] if int(uid) in self.all_uids_info else MinerInfo(**info)
-                miner_state = self.all_uids_info.setdefault(
-                    uid,
-                    {"scores": [], "reward_logs": []},
-                )
+                miner_state = self.all_uids_info.setdefault(uid, MinerInfo())
                 miner_state.category = info.get("category", "")
                 miner_state.epoch_volume = info.get("epoch_volume") if info.get("epoch_volume") else 512
                 info = miner_state
@@ -139,9 +149,9 @@ class MinerManager:
         Get miner uids based on category, useful if subnet has multiple categories
         """
         available_uids = [
-            int(uid)
-            for uid in self.all_uids_info.keys()
-            if self.all_uids_info[uid].category == category
+            uid for uid in self.all_uids_info.keys()
+            if isinstance(self.all_uids_info[uid], MinerInfo) and 
+            self.all_uids_info[uid].category == category
         ]
         return available_uids
 

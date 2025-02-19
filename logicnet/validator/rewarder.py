@@ -2,6 +2,7 @@ import torch
 import openai
 import sympy
 import random
+import time
 import bittensor as bt
 from concurrent import futures
 from logicnet.protocol import LogicSynapse
@@ -9,11 +10,18 @@ from sentence_transformers import SentenceTransformer
 from logicnet.utils.model_selector import model_selector
 from logicnet.utils.regex_helper import extract_numbers
 from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE, EXTRACT_ANSWER_PROMPT
+from logicnet.utils.func_helper import linear_function
 
 SIMILARITY_WEIGHT = 0.3
 CORRECTNESS_WEIGHT = 0.7
 PROCESSING_TIME_WEIGHT = -0.05
+ELIGIBLE_TIMEOUT = 604800 # 7 days
 
+
+class MinerInfo:
+    def __init__(self, uid: str, time: float):
+        self.uid = uid
+        self.time = time
 
 
 class LogicRewarder:
@@ -24,7 +32,7 @@ class LogicRewarder:
         self.model_rotation_pool = model_rotation_pool
         self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-    def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse):
+    def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse, new_miners: list[MinerInfo]):
         """Calculate reward for each response using similarity, correctness, and processing time.
 
         Args:
@@ -68,7 +76,7 @@ class LogicRewarder:
                     + CORRECTNESS_WEIGHT * correctness[i]
                     + PROCESSING_TIME_WEIGHT * min(process_times[i] / timeout, 1)
                 )
-        
+
                 # Scale up the reward
                 reward = reward / 2 + 0.5
                 valid_rewards.append(reward)
@@ -93,8 +101,15 @@ class LogicRewarder:
                     
                 except Exception as e:
                     bt.logging.error(f"Error in logging reward for valid miners: {e}")
-
-
+                    
+        # Bonus reward for new miners
+        if not new_miners:
+            bt.logging.info("No new miners within the eligible timeframe")
+        else:
+            # Convert new_miners from list of dicts to list of MinerInfo objects
+            new_miners = [MinerInfo(uid=miner['uid'], time=miner['time']) for miner in new_miners]
+            valid_rewards = self.bonus_rewarder(valid_uids, new_miners, valid_rewards)
+        
         total_uids = valid_uids + invalid_uids
         rewards = valid_rewards + invalid_rewards
 
@@ -204,7 +219,6 @@ class LogicRewarder:
             response = response.replace(char, ' ')
         return response
     
-
     def _get_correctness_by_llm(self, question: str, ground_truth: str, response: str, model_name: str, openai_client: openai.OpenAI):
         """Calculate the correctness score for a single response using LLM.
 
@@ -431,3 +445,48 @@ class LogicRewarder:
                             bt.logging.error(f"API request failed after switching: {e}")
 
         return response
+    
+    def bonus_rewarder(self, available_miner_uids: list[int], eligible_new_miners: list[MinerInfo], rewards: list[float]):
+        """Reward new miners with a bonus based on their registration time.
+
+        Args:
+            available_miner_uids (list[int]): List of miner UIDs that are currently active.
+            eligible_new_miners (list[MinerInfo]): List of MinerInfo objects containing miner UIDs and registration times.
+            rewards (list[float]): List of base rewards to be modified with bonuses.
+
+        Returns:
+            list[float]: Modified rewards list with time-based bonuses applied to eligible new miners.
+        """
+        if not available_miner_uids:
+            bt.logging.info("No available miners")
+            return rewards
+
+        new_miners_dict = {int(miner.uid): miner.time for miner in eligible_new_miners}
+        current_time = time.time()
+
+        bt.logging.debug(f"Processing bonus rewards - Eligible new miners: {new_miners_dict}")
+        bt.logging.debug(f"Available miner UIDs: {available_miner_uids}")
+
+        # Process each miner exactly once with direct dictionary lookup
+        for idx, miner_uid in enumerate(available_miner_uids):
+            if miner_uid in new_miners_dict:
+                miner_time = new_miners_dict[miner_uid]
+                time_factor = 1 - (current_time - miner_time) / ELIGIBLE_TIMEOUT
+                
+                if time_factor > 0:
+                    original_reward = rewards[idx]
+                    # Calculate bonus as a percentage of original reward, scaled by time factor
+                    bonus = linear_function(time_factor, m=0.1 * original_reward)
+                    rewards[idx] = min(original_reward + bonus, 1.0)
+                    
+                    bt.logging.info(
+                        f"Bonus applied to miner {miner_uid}: "
+                        f"final incentive = {rewards[idx]:.4f} "
+                        f"(original = {original_reward:.4f}, bonus = {bonus:.4f}, "
+                        f"time_factor = {time_factor:.2f})"
+                    )
+                else:
+                    bt.logging.debug(f"Miner {miner_uid} bonus period expired "
+                                f"(registered {(current_time - miner_time) / 86400:.1f} days ago)")
+
+        return rewards
