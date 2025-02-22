@@ -29,10 +29,10 @@ class LogicChallenger:
         # Generate a unique UID for this challenge
         unique_uid = str(uuid.uuid4())[:8]
 
-        atom_logic_question, atom_logic_answer = self.get_atom_logic_problem()
+        atom_logic_question, atom_logic_answer, selected_resource = self.get_atom_logic_problem()
         if atom_logic_question is None or atom_logic_answer is None:
             bt.logging.error(f"[{unique_uid}] Unable to retrieve atom logic problem. Retrying...")
-            atom_logic_question, atom_logic_answer = self.get_atom_logic_problem()
+            atom_logic_question, atom_logic_answer, selected_resource = self.get_atom_logic_problem()
 
         # Revise the problem
         conditions: dict = get_condition()
@@ -44,6 +44,7 @@ class LogicChallenger:
         bt.logging.debug(f"[{unique_uid}] Ground truth answer: {atom_logic_answer}")
 
         # Set the synapse attributes
+        synapse.selected_resource = selected_resource
         synapse.raw_logic_question = atom_logic_question
         synapse.ground_truth_answer = str(atom_logic_answer).replace("$", "").strip()
         synapse.logic_question = revised_logic_question
@@ -122,7 +123,7 @@ class LogicChallenger:
                 )
             return self.get_atom_logic_problem()
 
-        return atom_question, atom_answer
+        return atom_question, atom_answer, selected_resource
 
     def get_revised_logic_question(self, logic_question: str, conditions: dict) -> str:
         # prompt = "Please paraphrase by adding word or expression to this question as if you were a {profile} who is {mood} and write in a {tone} tone. You can use incorrect grammar, typo or add more context! Don't add your solution! Just say the revised version, you don't need to be polite.".format(
