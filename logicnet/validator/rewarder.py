@@ -8,12 +8,12 @@ from logicnet.protocol import LogicSynapse
 from sentence_transformers import SentenceTransformer
 from rapidfuzz import fuzz
 from logicnet.utils.model_selector import model_selector
-from logicnet.utils.regex_helper import extract_numerical_part
-from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE
+from logicnet.utils.regex_helper import extract_numbers
+from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE, EXTRACT_ANSWER_PROMPT
 
-SIMILARITY_WEIGHT = 0.2
-CORRECTNESS_WEIGHT = 0.8
-PROCESSING_TIME_WEIGHT = -0.1
+SIMILARITY_WEIGHT = 0.3
+CORRECTNESS_WEIGHT = 0.7
+PROCESSING_TIME_WEIGHT = -0.05
 
 
 
@@ -51,6 +51,8 @@ class LogicRewarder:
         invalid_reward_uids = [
             uid for uid, response in zip(reward_uids, reward_responses) if not response.is_success
         ]
+        bt.logging.info(f"Valid reward UIDs: {valid_reward_uids}")
+        bt.logging.info(f"Invalid reward UIDs: {invalid_reward_uids}")
         invalid_rewards = [0 for _ in invalid_reward_uids]
         reward_logs = []
         valid_rewards = []
@@ -84,19 +86,34 @@ class LogicRewarder:
                 if penalties[i] > self.penalty_threshold:
                     reward = reward * (1 - penalties[i])
 
+                # Scale up the reward
+                reward = reward / 2 + 0.5
+                valid_rewards.append(reward)
+
                 bt.logging.debug(
                     f"[REWARDER][{task_uid}] similarity: {similarities[i]}, correctness: {correctness[i]}, process_time: {process_times[i]}, penalty: {penalties[i]}, final_reward: {reward}"
                 )
-                valid_rewards.append(reward)
 
-                reward_info = {
-                    "task_uid": task_uid,  # Include the task_uid in the reward log
-                    "similarity": similarities[i],
-                    "correctness": correctness[i],
-                    "process_time": process_times[i],
-                    "penalty": penalties[i],
-                }
-                reward_logs.append(reward_info)
+                try:
+                    reward_info = {
+                        "task_uid": task_uid,
+                        "miner_uid": valid_reward_uids[i],
+                        "reward": reward,
+                        "similarity": similarities[i],
+                        "correctness": correctness[i],
+                        "process_time": process_times[i],
+                        "penalty": penalties[i],
+                        "miner_response": valid_reward_responses[i].logic_answer.strip(),
+                        "miner_reasoning": reward_response_texts[i],
+                        "question": base_synapse.raw_logic_question,
+                        "logic_question": base_synapse.logic_question,
+                        "ground_truth": base_synapse.ground_truth_answer,
+                        "ref_ground_truth": ref_ground_truth,
+                    }
+
+                    reward_logs.append(reward_info)               
+                except Exception as e:
+                    bt.logging.error(f"Error in logging reward for valid miners: {e}")
 
         total_uids = valid_reward_uids + invalid_reward_uids
         rewards = valid_rewards + invalid_rewards
@@ -104,11 +121,20 @@ class LogicRewarder:
         for invalid_uid in invalid_reward_uids:
             reward_logs.append({
                 "task_uid": task_uid,
+                "miner_uid": invalid_uid,
+                "reward": 0,
                 "similarity": 0,
                 "correctness": 0,
                 "process_time": 0,
                 "penalty": 0,
+                "miner_response": "",
+                "miner_reasoning": "",
+                "question": base_synapse.raw_logic_question,
+                "logic_question": base_synapse.logic_question,
+                "ground_truth": base_synapse.ground_truth_answer,
+                "ref_ground_truth": "",
             })
+
         return total_uids, rewards, reward_logs
 
     def _get_correctness(
@@ -132,24 +158,25 @@ class LogicRewarder:
             raise ValueError("API key is not valid or not provided.")
         
         openai_client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        bt.logging.debug(f"Initiating request with model '{model}' at base URL '{base_url}'.")
+        bt.logging.info(f"Initiating request with model '{model}' at base URL '{base_url}'.")
 
         ground_truth_answer = base_synapse.ground_truth_answer
-        bt.logging.debug(f"[CORRECTNESS] Ground truth: {ground_truth_answer}")
+        bt.logging.info(f"[CORRECTNESS] Ground truth: {ground_truth_answer}")
         correctness = []
         batch_llm_inputs = []
         indices_for_llm = []
 
         for idx, response in enumerate(responses):
             miner_answer = response.logic_answer.strip()
+            # bt.logging.info(f"[CORRECTNESS] Miner response: {miner_answer}")
             # Try programmatic comparison
             score = self._compare_numerical_answers(ground_truth_answer, miner_answer)
             if score is not None:
                 correctness.append(score)
-                bt.logging.debug(f"[CORRECTNESS] Used programmatic comparison for response {idx} with score {score}")
+                bt.logging.info(f"[CORRECTNESS] Used programmatic comparison for response {idx} with score {score}")
             else:
                 # Need LLM evaluation
-                bt.logging.debug(f"[CORRECTNESS] Unable to use programmatic comparison. Need LLM evaluation for response {idx}")
+                bt.logging.info(f"[CORRECTNESS] Unable to use programmatic comparison. Need LLM evaluation for response")
                 correctness.append(0)  # Placeholder
                 batch_llm_inputs.append({
                     "question": base_synapse.raw_logic_question,
@@ -174,7 +201,7 @@ class LogicRewarder:
                             batch_llm_inputs,
                         )
                         for idx, score in zip(indices_for_llm, llm_scores):
-                            bt.logging.debug(f"[CORRECTNESS] Rating: {score}")
+                            bt.logging.info(f"[CORRECTNESS] LLM Rating: {score}")
                             correctness[idx] = score
                         break
                     except Exception as e:
@@ -182,6 +209,20 @@ class LogicRewarder:
                         for idx in indices_for_llm:
                             correctness[idx] = 0.5
         return correctness
+    
+    def clean_response(self, response: str):
+        """Clean the response by removing formatting characters.
+
+        Args:
+            response (str): Raw response.
+
+        Returns:
+            str: Cleaned response.
+        """
+        formatting_chars = ['$', '$$', '\\[', '\\]', '%', '-', "<", ">", "/", "*", "#", "!"]
+        for char in formatting_chars:
+            response = response.replace(char, ' ')
+        return response
     
 
     def _get_correctness_by_llm(self, question: str, ground_truth: str, response: str, model_name: str, openai_client: openai.OpenAI):
@@ -197,30 +238,63 @@ class LogicRewarder:
         Returns:
             float: Correctness score for the response (float between 0 and 1).
         """
-
+        # response = response.replace("\n---", "").replace("---\n", "")
+        if response.strip() == ";":
+            return 0.0
         ## check trick case
         try:
+            ## check with hard rule
             strings = ['a', 'b', 'c', 'd', 'e'] ## add to response to avoid gpt cached the output
+            cheat_words = ["miner_answer", "<example>", "</", "preference>", "<preference"]
+            for cheat_word in cheat_words:
+                if cheat_word in response.lower():
+                    return -1
+                
+            clone_response = self.clean_response(response)
+            clone_response = str(random.choice(strings)) + clone_response + str(random.choice(strings))
             response_str = openai_client.chat.completions.create(
-                model=model_name,
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "user",
                         "content": DETECT_TRICK_TEMPLATE.format(
-                            response=str(random.choice(strings)) + response + str(random.choice(strings))
+                            response=clone_response
                         ),
                     },
                 ],
-                max_tokens=5,
+                max_tokens=25,
                 temperature=0,
             ).choices[0].message.content.strip().lower()
-            bt.logging.debug(f"[CORRECTNESS] Trick detection: {response_str}")
+            bt.logging.info(f"[CORRECTNESS] Trick detection: {response_str} ====> {response[:100]}")
             if "yes" in response_str:
-                return 0
+                return -1
         except Exception as e:
             bt.logging.error(f"API request failed: {e}")
         
         try:
+            if len(response.split()) < 20:
+                extraced_miner_answer = response
+            else:
+                extraced_miner_answer = openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": EXTRACT_ANSWER_PROMPT.format(
+                                response=response,
+                                question=question
+                            ),
+                        },
+                    ],
+                    max_tokens=25,
+                    temperature=0,
+                ).choices[0].message.content.strip().lower()
+                if "not_found" in extraced_miner_answer or "not found" in extraced_miner_answer:
+                    bt.logging.info(f"[CORRECTNESS] Extracted answer not found: {response}")
+                    return 0.0
+                else:
+                    bt.logging.info(f"[CORRECTNESS] Extracted answer: {extraced_miner_answer}")
+
             response_str = openai_client.chat.completions.create(
                 model=model_name,
                 messages=[
@@ -229,14 +303,14 @@ class LogicRewarder:
                         "content": CORRECTNESS_TEMPLATE.format(
                             question=question,
                             ground_truth_answer=ground_truth,
-                            response=response
+                            response=extraced_miner_answer
                         ),
                     },
                 ],
                 max_tokens=15,
                 temperature=0,
             ).choices[0].message.content.strip().lower()
-            bt.logging.debug(f"[CORRECTNESS] Rating: {response_str}")
+            bt.logging.info(f"[CORRECTNESS] Rating: {response_str}")
             try:
                 correctness_score = float(response_str)
                 return min(max(correctness_score, 0.0), 1.0)
@@ -247,38 +321,7 @@ class LogicRewarder:
                 return 0.5
         except openai.OpenAIError as e:
             bt.logging.error(f"API request failed: {e}")
-            # Switch to another model, base URL, and API key
-            model, base_url, api_key = model_selector(self.model_rotation_pool)
-            if not model or not base_url or not api_key:
-                bt.logging.error("No alternative model, base URL, or API key available.")
-                return 0.5
-            else:
-                try:
-                    openai_client = openai.OpenAI(base_url=base_url, api_key=api_key)
-                    bt.logging.debug(f"Initiating request with model '{model}' at base URL '{base_url}'.")
-                    response_str = openai_client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": CORRECTNESS_TEMPLATE.format(
-                                    question=question,
-                                    ground_truth_answer=ground_truth,
-                                    response=response
-                                ),
-                            },
-                        ],
-                        max_tokens=15,
-                        temperature=0,
-                    ).choices[0].message.content.strip().lower()
-                    bt.logging.debug(f"[CORRECTNESS] Rating: {response_str}")
-                    correctness_score = float(response_str)
-                    return min(max(correctness_score, 0.0), 1.0)
-                except Exception as e:
-                    bt.logging.warning(f"Failed to parse correctness score. Assigning default score of 0.5. Error {e}")
-                    if "1" in response_str:
-                        return 1.0
-                    return 0.5
+            return 0.5
         except Exception as e:
             bt.logging.error(f"Error in compute score by llm model: {e}")
             return 0.5
@@ -292,29 +335,33 @@ class LogicRewarder:
                 miner_answer = miner_answer.replace(char, '')
 
             # Extract numerical values
-            gt_value_str = extract_numerical_part(ground_truth)
-            miner_value_str = extract_numerical_part(miner_answer)
+            gt_values = extract_numbers(ground_truth)
+            miner_values = extract_numbers(miner_answer)
 
-            if gt_value_str is None or miner_value_str is None:
-                raise ValueError("No numerical value found in one of the answers.")
+            if len(gt_values) == 0:
+                return None
 
-            gt_value = sympy.sympify(gt_value_str)
-            miner_value = sympy.sympify(miner_value_str)
+            if len(gt_values) > 0 and len(miner_values) == 0:
+                return 0.0
 
-            abs_difference = abs(gt_value - miner_value)
-            epsilon = 1e-8
-            gt_abs = abs(gt_value) + epsilon
-            relative_error = abs_difference / gt_abs
-            # Logs for debugging
-            bt.logging.debug(f"[CORRECTNESS DEBUG FOR NUMERICAL COMPARISON]: Absolute difference: {abs_difference}, Relative error: {relative_error}")
-
-            correctness_score = max(0.0, 1.0 - relative_error)
-            correctness_score = min(correctness_score, 1.0)
-            return correctness_score
+            if len(gt_values) == 1 and len(miner_values) == 1:
+                # Single numerical value found in both answers
+                gt_value = gt_values[0]
+                miner_value = miner_values[0]
+                abs_difference = abs(gt_value - miner_value)
+                epsilon = 1e-8
+                gt_abs = abs(gt_value) + epsilon
+                relative_error = abs_difference / gt_abs
+                # Logs for debugging
+                bt.logging.info(f"[CORRECTNESS DEBUG FOR NUMERICAL COMPARISON]: Absolute difference: {abs_difference}, Relative error: {relative_error}")
+                correctness_score = max(0.0, 1.0 - relative_error)
+                correctness_score = min(correctness_score, 1.0)
+                return correctness_score
+            return None
         except Exception as e:
             # Log the problematic input for debugging
             bt.logging.warning(
-                f"Failed to sympify numerical answers.\nError: {e}"
+                f"Failed to _compare_numerical_answers. Error: {e}"
             )
             # Return None so that LLM-based correctness check will be used.
             return None
@@ -409,7 +456,7 @@ class LogicRewarder:
             raise ValueError("API key is not valid or not provided.")
 
         openai_client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        bt.logging.debug(f"Initiating request with model '{model}' at base URL '{base_url}'.")
+        bt.logging.info(f"Initiating request with model '{model}' at base URL '{base_url}'.")
 
         response = ""
         for attempt in range(3):  # Retry up to 3 times
@@ -421,7 +468,7 @@ class LogicRewarder:
                     temperature=0.7,
                 )
                 response = response.choices[0].message.content
-                bt.logging.debug(f"[SIMILARITY] Self-generated ground truth: {response}")
+                # bt.logging.info(f"[SIMILARITY] Self-generated ground truth: {response}")
                 return response  # Return response if successful
             
             except openai.OpenAIError as e:
@@ -434,7 +481,7 @@ class LogicRewarder:
 
                     else:
                         openai_client = openai.OpenAI(base_url=base_url, api_key=api_key)
-                        bt.logging.debug(f"Initiating request with model '{model}' at base URL '{base_url}'.")
+                        bt.logging.info(f"Initiating request with model '{model}' at base URL '{base_url}'.")
                         try:
                             response = openai_client.chat.completions.create(
                                 model=model,
@@ -443,7 +490,7 @@ class LogicRewarder:
                                 temperature=0.7,
                             )
                             response = response.choices[0].message.content
-                            bt.logging.debug(f"[SIMILARITY] Self-generated ground truth: {response}")
+                            # bt.logging.info(f"[SIMILARITY] Self-generated ground truth: {response}")
                             return response
                         except openai.OpenAIError as e:
                             bt.logging.error(f"API request failed after switching: {e}")

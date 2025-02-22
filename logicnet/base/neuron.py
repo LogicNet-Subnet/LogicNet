@@ -108,10 +108,16 @@ class BaseNeuron(ABC):
         self.check_registered()
 
         if self.should_sync_metagraph():
+            bt.logging.info("Resyncing metagraph.")
             self.resync_metagraph()
+        else:
+            bt.logging.info("Should not resyncing metagraph.")
 
         if self.should_set_weights():
+            bt.logging.info("Setting weights.")
             self.set_weights()
+        else:
+            bt.logging.info("Should not setting weights.")
 
     def check_registered(self):
         # --- Check for registration.

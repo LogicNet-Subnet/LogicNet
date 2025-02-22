@@ -34,4 +34,7 @@ else
     echo "Please set USE_TORCH=1 manually in the .env file"
 fi
 
+# source the .env file
+source .env
+
 echo "Setup complete!"

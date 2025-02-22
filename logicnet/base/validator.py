@@ -201,7 +201,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # Calculate the average reward for each uid across non-zero values.
         # Replace any NaN values with 0.
         raw_weights = torch.nn.functional.normalize(self.scores, p=1, dim=0)
-        bt.logging.trace("raw_weights", raw_weights)
+        bt.logging.info(f"raw_weights {raw_weights}")
         bt.logging.trace("top10 values", raw_weights.sort()[0])
         bt.logging.trace("top10 uids", raw_weights.sort()[1])
 
@@ -254,11 +254,15 @@ class BaseValidatorNeuron(BaseNeuron):
         # Zero out all hotkeys that have been replaced.
         for uid, hotkey in enumerate(self.hotkeys):
             if (hotkey != self.metagraph.hotkeys[uid]):
+                bt.logging.info(f"\033[1;32m🔄 Hotkey {hotkey} has been replaced\033[0m")
                 self.scores[uid] = 0  # hotkey has been replaced
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
         if len(self.hotkeys) < len(self.metagraph.hotkeys):
+            bt.logging.info(
+                "\033[1;32m🔄 Metagraph has grown, adding new hotkeys and moving averages\033[0m"
+            )
             # Update the size of the moving average scores.
             new_moving_average = torch.zeros((self.metagraph.n)).to(self.device)
             min_len = min(len(self.hotkeys), len(self.scores))

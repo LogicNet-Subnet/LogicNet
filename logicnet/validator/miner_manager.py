@@ -8,7 +8,7 @@ from logicnet.utils.volume_setting import (
 )
 import traceback
 
-NO_OF_RECENT_SCORES = 20
+NO_OF_RECENT_SCORES = 5
 
 
 class MinerInfo:

@@ -11,7 +11,7 @@ synapse = LogicSynapse()
 MODEL = os.getenv("MINER_MODEL", "gpt-4o-mini")
 BASE_URL = os.getenv("MINER_BASE_URL", "https://api.openai.com/v1")
 KEY = os.getenv("MINER_KEY")
-DATASET_WEIGHT = "20,20,20,20,20,20,20"
+DATASET_WEIGHT = "40,20,20,20"
 print(MODEL, BASE_URL, KEY)
 
 model_rotation_pool = {

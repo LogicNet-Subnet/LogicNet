@@ -2,7 +2,7 @@ import bittensor as bt
 import torch
 
 MIN_RATE_LIMIT = 2
-MAX_RATE_LIMIT = 80
+MAX_RATE_LIMIT = 35
 
 
 def get_rate_limit_per_validator(

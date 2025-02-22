@@ -33,6 +33,9 @@ class QueryQueue:
             q.queue.clear()
         for q in self.proxy_queue.values():
             q.queue.clear()
+
+        all_uids_by_category = {category: [] for category in self.synthentic_queue}
+
         for uid, info in all_uids_info.items():
             if not info.category:
                 continue
@@ -45,13 +48,30 @@ class QueryQueue:
             synthetic_rate_limit, proxy_rate_limit = self.get_rate_limit_by_type(
                 info.rate_limit
             )
+            if info.category not in all_uids_by_category:
+                all_uids_by_category[info.category] = []
+            all_uids_by_category[info.category].append(QueryItem(uid=uid))
+
             for _ in range(int(synthetic_rate_limit)):
                 synthentic_model_queue.put(QueryItem(uid=uid))
             for _ in range(int(proxy_rate_limit)):
                 proxy_model_queue.put(QueryItem(uid=uid))
+        
         # Shuffle the queue
         for category, q in self.synthentic_queue.items():
-            random.shuffle(q.queue)
+            shuffled_items = list(q.queue)
+            random.shuffle(shuffled_items)
+            q.queue.clear()
+
+            # add full list UID at the start of the queue, make sure that all UID is queried at least twice in the loop begining
+            for _ in range(2):
+                for item in all_uids_by_category[category]:
+                    q.put(item)
+            
+            # add shuffled items to the queue
+            for item in shuffled_items:
+                q.put(item)
+
             self.total_uids_remaining += len(q.queue)
             bt.logging.info(
                 f"- Model {category} has {len(q.queue)} uids remaining for synthentic"
@@ -104,9 +124,9 @@ class QueryQueue:
             yield category, uids_to_query, should_rewards, time_to_sleep
 
     def random_should_reward(self, uid):
-        if uid not in self.synthentic_rewarded or self.synthentic_rewarded[uid] <= 10:
+        if uid not in self.synthentic_rewarded or self.synthentic_rewarded[uid] < 2:
             return True
-        return random.random() < 0.3 ## 30% chance of rewarding
+        return random.random() < 0.2 ## 20% chance of rewarding
 
 
     def get_query_for_proxy(self, category):
