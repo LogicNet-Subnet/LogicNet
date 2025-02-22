@@ -209,7 +209,7 @@ def add_args(cls, parser):
             "--penalty_threshold",
             type=float,
             help="The similarity threshold for penalty",
-            default=0.8,
+            default=0.95,
         )
 
     else:

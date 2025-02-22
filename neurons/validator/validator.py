@@ -171,7 +171,7 @@ class Validator(BaseValidatorNeuron):
                 self.wandb_manager.init_wandb()
 
         # Query and reward
-        futures_with_metadata = []
+        futures_with_metadata = {}
         for (
             category,
             uids,
@@ -188,7 +188,7 @@ class Validator(BaseValidatorNeuron):
                 uids, 
                 should_rewards
             ) 
-            futures_with_metadata.append((future, category, uids, should_rewards))
+            futures_with_metadata[future] = (category, uids, should_rewards)
 
             bt.logging.info(
                 f"\033[1;34m😴 Sleeping for {sleep_per_batch} seconds between batches\033[0m"
@@ -196,11 +196,12 @@ class Validator(BaseValidatorNeuron):
             time.sleep(sleep_per_batch)
 
         # Wait for all submitted tasks to complete
-        for future, category, uids, should_rewards in as_completed(futures_with_metadata):
+        for future in as_completed(futures_with_metadata):
             try:
                 future.result()
             except Exception as exc:
                 # Get the args that were passed to the failed task
+                category, uids, should_rewards = futures_with_metadata[future]
                 bt.logging.warning(f"\033[1;33m⚠️ Task failed with error: {exc}\nFuture: {future}\nCategory: {category}\nUids: {uids}\nShould rewards: {should_rewards}\033[0m")
 
         # Assign incentive rewards

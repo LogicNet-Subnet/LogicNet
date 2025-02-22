@@ -85,7 +85,7 @@ class LogicRewarder:
                     reward = reward * (1 - penalties[i])
 
                 bt.logging.debug(
-                    f"[REWARDER][{task_uid}] similarity: {similarities[i]}, correctness: {correctness[i]}, process_time: {process_times[i]}, final_reward: {reward}"
+                    f"[REWARDER][{task_uid}] similarity: {similarities[i]}, correctness: {correctness[i]}, process_time: {process_times[i]}, penalty: {penalties[i]}, final_reward: {reward}"
                 )
                 valid_rewards.append(reward)
 
