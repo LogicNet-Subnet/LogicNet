@@ -1,15 +1,19 @@
-import torch
+import random
+from concurrent import futures
+
+import bittensor as bt
 import openai
 import sympy
-import random
-import bittensor as bt
-from concurrent import futures
-from logicnet.protocol import LogicSynapse
-from sentence_transformers import SentenceTransformer
+import torch
 from rapidfuzz import fuzz
+from sentence_transformers import SentenceTransformer
+
+from logicnet.protocol import LogicSynapse
 from logicnet.utils.model_selector import model_selector
 from logicnet.utils.regex_helper import extract_numbers
-from logicnet.validator.prompt import DETECT_TRICK_TEMPLATE, CORRECTNESS_TEMPLATE, EXTRACT_ANSWER_PROMPT
+from logicnet.validator.prompt import (CORRECTNESS_TEMPLATE,
+                                       DETECT_TRICK_TEMPLATE,
+                                       EXTRACT_ANSWER_PROMPT)
 
 SIMILARITY_WEIGHT = 0.3
 CORRECTNESS_WEIGHT = 0.7
@@ -89,10 +93,6 @@ class LogicRewarder:
                 # Scale up the reward
                 reward = reward / 2 + 0.5
                 valid_rewards.append(reward)
-
-                bt.logging.debug(
-                    f"[REWARDER][{task_uid}] similarity: {similarities[i]}, correctness: {correctness[i]}, process_time: {process_times[i]}, penalty: {penalties[i]}, final_reward: {reward}"
-                )
 
                 try:
                     reward_info = {
