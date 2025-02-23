@@ -11,6 +11,7 @@ openai==1.35.14
 sentence-transformers==3.0.1
 python-dotenv==1.0.1
 loguru
+rapidfuzz==3.12.1
 sympy
 wandb
 datasets

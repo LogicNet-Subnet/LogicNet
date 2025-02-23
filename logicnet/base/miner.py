@@ -61,6 +61,7 @@ class BaseMinerNeuron(BaseNeuron):
 
         # Check that miner is registered on the network.
         self.sync()
+        last_sync_block = self.block
 
         # Serve passes the axon information to the network + netuid we are hosting on.
         # This will auto-update if the axon port of external ip have changed.
@@ -69,28 +70,25 @@ class BaseMinerNeuron(BaseNeuron):
         )
         self.axon.serve(netuid=self.config.netuid, subtensor=self.subtensor)
 
-        # Start  starts the miner's axon, making it active on the network.
+        # Start starts the miner's axon, making it active on the network.
         self.axon.start()
 
         bt.logging.info(f"\033[1;32m🧠 Miner starting at block: {self.block}\033[0m")
 
         # This loop maintains the miner's operations until intentionally stopped.
         try:
+            RESYNC_INTERVAL = self.config.neuron.epoch_length # resync every self.config.neuron.epoch_length blocks
+            SLEEP_TIME = 30 # sleep time between checks (seconds)
+
             while not self.should_exit:
-                while (
-                    self.block - self.metagraph.last_update[self.uid]
-                    < self.config.neuron.epoch_length
-                ):
-                    # Wait before checking again.
-                    time.sleep(1)
-
-                    # Check if we should exit.
-                    if self.should_exit:
-                        break
-
-                # Sync metagraph and potentially set weights.
-                self.sync()
-                self.step += 1
+                try:
+                    if self.block - last_sync_block > RESYNC_INTERVAL:
+                        self.sync()
+                        self.step += 1
+                        last_sync_block = self.block
+                    time.sleep(SLEEP_TIME)
+                except Exception as e:
+                    bt.logging.error(f"\033[1;31m❌ Miner exception: {e}\033[0m")
 
         # If someone intentionally stops the miner, it'll safely terminate operations.
         except KeyboardInterrupt:

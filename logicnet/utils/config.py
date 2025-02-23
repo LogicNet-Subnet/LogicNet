@@ -136,8 +136,8 @@ def add_args(cls, parser):
         parser.add_argument(
             "--async_batch_size",
             type=int,
-            help="The number of threads to run in a single loop.",
-            default=16,
+            help="Validator query batch size.",
+            default=32,
         )
 
         parser.add_argument(
@@ -203,6 +203,13 @@ def add_args(cls, parser):
             type=str,
             help="The weight of the dataset",
             default="60,20,20",
+        )
+
+        parser.add_argument(
+            "--penalty_threshold",
+            type=float,
+            help="The similarity threshold for penalty",
+            default=0.95,
         )
 
     else:

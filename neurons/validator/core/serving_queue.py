@@ -86,28 +86,42 @@ class QueryQueue:
         if not self.total_uids_remaining:
             return
         more_data = True
+        initial_total = self.total_uids_remaining 
+
         while more_data:
             more_data = False
-            for category, q in self.synthentic_queue.items():
-                if q.empty():
-                    continue
-                time_to_sleep = self.time_per_loop * (
-                    min(batch_size / (self.total_uids_remaining + 1), 1)
-                )
-                uids_to_query = []
-                should_rewards = []
+            # Get non-empty categories
+            available_categories = [
+                category for category, q in self.synthentic_queue.items() 
+                if q and not q.empty()
+            ]
+            
+            if not available_categories:
+                continue
 
-                while len(uids_to_query) < batch_size and not q.empty():
-                    more_data = True
-                    query_item = q.get()
-                    uids_to_query.append(query_item.uid)
-                    should_rewards.append(self.random_should_reward(query_item.uid))
+            # Randomly select one category
+            category = random.choice(available_categories)
+            q = self.synthentic_queue.get(category)
 
-                    if query_item.uid not in self.synthentic_rewarded:
-                        self.synthentic_rewarded[query_item.uid] = 0
-                    self.synthentic_rewarded[query_item.uid] += 1
+            # Calculate progress through queue (0.0 to 1.0)
+            progress = 1 - (self.total_uids_remaining / max(initial_total, 1))
+            time_to_sleep = self.time_per_loop * min(batch_size / (initial_total + 1), 1) * math.exp(progress) 
 
-                yield category, uids_to_query, should_rewards, time_to_sleep
+            uids_to_query = []
+            should_rewards = []
+
+            while len(uids_to_query) < batch_size and not q.empty():
+                more_data = True
+                query_item = q.get()
+                uids_to_query.append(query_item.uid)
+                should_rewards.append(self.random_should_reward(query_item.uid))
+
+                if query_item.uid not in self.synthentic_rewarded:
+                    self.synthentic_rewarded[query_item.uid] = 0
+                self.synthentic_rewarded[query_item.uid] += 1
+                self.total_uids_remaining -= 1
+
+            yield category, uids_to_query, should_rewards, time_to_sleep
 
     def random_should_reward(self, uid):
         if uid not in self.synthentic_rewarded or self.synthentic_rewarded[uid] < 2:
