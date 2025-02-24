@@ -311,7 +311,7 @@ class LogicRewarder:
     def _compare_numerical_answers(self, ground_truth: str, miner_answer: str):
         try:
             # Remove formatting characters from the answers
-            formatting_chars = ['$', '$$', '\\[', '\\]', '%']
+            formatting_chars = ['$', '$$', '\\[', '\\]', '%', 'm^2', 'm^3']
             for char in formatting_chars:
                 ground_truth = ground_truth.replace(char, '')
                 miner_answer = miner_answer.replace(char, '')
@@ -323,19 +323,26 @@ class LogicRewarder:
             if len(gt_values) == 0:
                 return None
 
-            if len(gt_values) > 0 and len(miner_values) == 0:
-                return 0.0
+            gt_value = None
+            miner_value = None
 
             if len(gt_values) == 1 and len(miner_values) == 1:
                 # Single numerical value found in both answers
                 gt_value = gt_values[0]
                 miner_value = miner_values[0]
+            else:
+                try:
+                    if "**" not in ground_truth and "**" not in miner_answer and "^" not in ground_truth and "^" not in miner_answer:
+                        gt_value = sympy.sympify(ground_truth.strip())
+                        miner_value = sympy.sympify(miner_answer.strip())
+                except Exception as e:
+                    return None
+
+            if gt_value is not None and miner_value is not None:
                 abs_difference = abs(gt_value - miner_value)
                 epsilon = 1e-8
                 gt_abs = abs(gt_value) + epsilon
                 relative_error = abs_difference / gt_abs
-                # Logs for debugging
-                bt.logging.info(f"[CORRECTNESS DEBUG FOR NUMERICAL COMPARISON]: Absolute difference: {abs_difference}, Relative error: {relative_error}")
                 correctness_score = max(0.0, 1.0 - relative_error)
                 correctness_score = min(correctness_score, 1.0)
                 return correctness_score
