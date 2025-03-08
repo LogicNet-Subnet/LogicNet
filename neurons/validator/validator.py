@@ -27,13 +27,13 @@ from collections import defaultdict
 import wandb
 
 
-def init_category(config=None, model_rotation_pool=None, dataset_weight=None):
+def init_category(config=None, model_pool=None, dataset_weight=None):
     category = {
         "Logic": {
             "synapse_type": ln.protocol.LogicSynapse,
             "incentive_weight": 1.0,
-            "challenger": LogicChallenger(model_rotation_pool, dataset_weight),
-            "rewarder": LogicRewarder(model_rotation_pool),
+            "challenger": LogicChallenger(model_pool, dataset_weight),
+            "rewarder": LogicRewarder(model_pool),
             "timeout": 64,
         }
     }
@@ -57,71 +57,36 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info("\033[1;32m🧠 load_state()\033[0m")
 
         ### Initialize model rotation pool ###
-        self.model_rotation_pool = {}
+        self.model_pool = {}
         openai_key = os.getenv("OPENAI_API_KEY")
-        togetherai_key = os.getenv("TOGETHERAI_API_KEY")
-        if not openai_key and not togetherai_key:
-            bt.logging.warning("OPENAI_API_KEY or TOGETHERAI_API_KEY is not set. Please set it to use OpenAI or TogetherAI.")
-            raise ValueError("OPENAI_API_KEY or TOGETHERAI_API_KEY is not set. Please set it to use OpenAI or TogetherAI and restart the validator.")
+        if not openai_key:
+            bt.logging.warning("OPENAI_API_KEY is not set. Please set it to use OpenAI")
+            raise ValueError("OPENAI_API_KEY is not set. Please set it to use OpenAI or restart the validator.")
         
-        base_urls = self.config.llm_client.base_urls.split(",")
-        models = self.config.llm_client.models.split(",")
+        if self.config.llm_client.gpt_url and self.config.llm_client.gpt_model:
+            self.model_pool["openai"] = [
+                self.config.llm_client.gpt_url,
+                openai_key,
+                self.config.llm_client.gpt_model
+            ]
+        if self.config.llm_client.vllm_url and self.config.llm_client.vllm_model:
+            self.model_pool["vllm"] = [
+                self.config.llm_client.vllm_url, 
+                self.config.llm_client.vllm_key, 
+                self.config.llm_client.vllm_model
+            ]
 
-        # Ensure the lists have enough elements
-        # if len(base_urls) < 3 or len(models) < 3:
-        #     bt.logging.warning("base_urls or models configuration is incomplete. Please ensure they have just 3 entries.")
-        #     raise ValueError("base_urls or models configuration is incomplete. Please ensure they have just 3 entries.")
-
-        if len(base_urls) < 1 or len(models) < 1:
-            bt.logging.warning(
-                "base_urls or models configuration is incomplete. Please ensure they have at least 1 entry."
-            )
-            raise ValueError(
-                "base_urls or models configuration is incomplete. Please ensure they have at least 1 entry."
-            )
+        for key, value in self.model_pool.items():
+            if value[2] in model_blacklist:
+                bt.logging.warning(f"Model {value[2]} is blacklisted. Please use another model.")
+                del self.model_pool[key]
         
-        self.model_rotation_pool = {
-            # "vllm": [base_urls[0].strip(), "xyz", models[0]],
-            "openai": [base_urls[1].strip(), openai_key, models[1]],
-            # "togetherai": [base_urls[2].strip(), togetherai_key, models[2]],
-        }
-        # for key, value in self.model_rotation_pool.items():
-        #     if value[2] in model_blacklist:
-        #         bt.logging.warning(f"Model {value[2]} is blacklisted. Please use another model.")
-        #         self.model_rotation_pool[key] = "no use"
+        # Check if all models are invalid
+        if not self.model_pool:
+            bt.logging.warning("All models are invalid. Validator cannot proceed.")
+            raise ValueError("All models are invalid. Please configure at least one model and restart the validator.")
         
-        # Immediately blacklist if it's not "gpt-4o" and force it to be "gpt-4o"
-        if "gpt-4o" not in self.model_rotation_pool["openai"][2]:
-            bt.logging.warning(
-                f"Model must be gpt-4o. Found {self.model_rotation_pool['openai'][2]} instead."
-            )
-            bt.logging.info("Setting OpenAI model to gpt-4o.")
-            self.model_rotation_pool["openai"][2] = "gpt-4o"
-        
-        # Check if 'null' is at the same index in both cli lsts
-        for i in range(3):
-            if base_urls[i].strip() == 'null' or models[i].strip() == 'null':
-                if i == 0:
-                    self.model_rotation_pool["vllm"] = "no use"
-                elif i == 1:
-                    self.model_rotation_pool["openai"] = "no use"
-                elif i == 2:
-                    self.model_rotation_pool["togetherai"] = "no use"
-        
-        # Check if all models are set to "no use"
-        if all(value == "no use" for value in self.model_rotation_pool.values()):
-            bt.logging.warning("All models are set to 'no use'. Validator cannot proceed.")
-            raise ValueError("All models are set to 'no use'. Please configure at least one model and restart the validator.")
-        
-        # Create a model_rotation_pool_without_keys
-        model_rotation_pool_without_keys = {
-            key: "no use" if value == "no use" else [value[0], "Not allowed to see.", value[2]]
-            if key in ["openai", "togetherai"] else value
-            for key, value in self.model_rotation_pool.items()
-        }
-        bt.logging.info(f"Model rotation pool without keys: {model_rotation_pool_without_keys}")
-
-        self.categories = init_category(self.config, self.model_rotation_pool, self.config.dataset_weight)
+        self.categories = init_category(self.config, self.model_pool, self.config.dataset_weight)
         self.miner_manager = MinerManager(self)
         self.load_state()
         self.update_scores_on_chain()

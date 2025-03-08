@@ -176,23 +176,31 @@ def add_args(cls, parser):
         )
 
         parser.add_argument(
-            "--llm_client.base_urls",
+            "--llm_client.gpt_url",
             type=str,
-            help="The base url for the LLM client",
-            # default="http://localhost:8000/v1,https://api.openai.com/v1,https://api.together.xyz/v1",
-            default="null,https://api.openai.com/v1,null",
+            help="The base url for the gpt client",
+            default="https://api.openai.com/v1",
         )
-
         parser.add_argument(
-            "--llm_client.models",
+            "--llm_client.vllm_url",
             type=str,
-            help="The model for the LLM client",
-            # default="Qwen/Qwen2.5-7B-Instruct,gpt-4o-mini,meta-llama/Llama-3.3-70B-Instruct-Turbo",
-            default="null,gpt-4o,null",
+            help="The model for the VLLM client",
+            default="http://localhost:8000/v1",
         )
-
         parser.add_argument(
-            "--llm_client.keys",
+            "--llm_client.gpt_model",
+            type=str,
+            help="The model for the gpt client",
+            default="gpt-4o-mini",
+        )
+        parser.add_argument(
+            "--llm_client.vllm_model",
+            type=str,
+            help="The model for the VLLM client",
+            default="Qwen/Qwen2.5-7B-Instruct",
+        )
+        parser.add_argument(
+            "--llm_client.vllm_key",
             type=str,
             help="The key for the LLM client",
             default="xyz",

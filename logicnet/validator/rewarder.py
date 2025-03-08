@@ -17,11 +17,11 @@ PROCESSING_TIME_WEIGHT = -0.05
 
 
 class LogicRewarder:
-    def __init__(self, model_rotation_pool: dict):
+    def __init__(self, model_pool: dict):
         """
         READ HERE TO LEARN HOW VALIDATOR REWARD THE MINER
         """
-        self.model_rotation_pool = model_rotation_pool
+        self.model_pool = model_pool
         self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
     def __call__(self, uids, responses: list[LogicSynapse], base_synapse: LogicSynapse):
@@ -130,7 +130,7 @@ class LogicRewarder:
         Returns:
             list[float]: List of correctness scores for each response (float between 0 and 1).
         """
-        model, base_url, api_key = model_selector(self.model_rotation_pool)
+        model, base_url, api_key = model_selector(self.model_pool, task_type="score_task")
         if not model:
             raise ValueError("Model ID is not valid or not provided.")
         if not base_url:
@@ -234,7 +234,7 @@ class LogicRewarder:
             clone_response = self.clean_response(response)
             clone_response = str(random.choice(strings)) + clone_response + str(random.choice(strings))
             response_str = openai_client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "user",
@@ -257,7 +257,7 @@ class LogicRewarder:
                 extraced_miner_answer = response
             else:
                 extraced_miner_answer = openai_client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "user",
@@ -308,6 +308,8 @@ class LogicRewarder:
             return 0.5
 
     def _compare_numerical_answers(self, ground_truth: str, miner_answer: str):
+        if ground_truth.strip().lower() == miner_answer.strip().lower():
+            return 1.0
         try:
             # Remove formatting characters from the answers
             formatting_chars = ['$', '$$', '\\[', '\\]', '%', 'm^2', 'm^3']
@@ -394,7 +396,7 @@ class LogicRewarder:
         messages = [
             {"role": "user", "content": question},
         ]
-        model, base_url, api_key = model_selector(self.model_rotation_pool)
+        model, base_url, api_key = model_selector(self.model_pool, task_type="create_task")
         if not model:
             raise ValueError("Model ID is not valid or not provided.")
         if not base_url:
@@ -411,7 +413,7 @@ class LogicRewarder:
                 response = openai_client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    max_tokens=1024,
+                    max_tokens=300,
                     temperature=0.7,
                 )
                 response = response.choices[0].message.content
@@ -422,7 +424,7 @@ class LogicRewarder:
                 bt.logging.error(f"API request failed on attempt {attempt + 1}: {e}")
                 if attempt == 2:  # Last attempt
                     # Switch to another model, base URL, and API key
-                    model, base_url, api_key = model_selector(self.model_rotation_pool)
+                    model, base_url, api_key = model_selector(self.model_pool, task_type="create_task")
                     if not model or not base_url or not api_key:
                         bt.logging.error("No alternative model, base URL, or API key available.")
 

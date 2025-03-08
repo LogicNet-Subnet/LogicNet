@@ -14,11 +14,11 @@ KEY = os.getenv("MINER_KEY")
 DATASET_WEIGHT = "40,20,20,20"
 print(MODEL, BASE_URL, KEY)
 
-model_rotation_pool = {
+model_pool = {
     "gpt-4o": [BASE_URL, KEY, "gpt-4o-mini"],
 }
 challenger = LogicChallenger(
-    model_rotation_pool=model_rotation_pool,
+    model_pool=model_pool,
     dataset_weight=DATASET_WEIGHT,
 )
 
