@@ -134,12 +134,17 @@ def add_args(cls, parser):
         )
 
         parser.add_argument(
-            "--async_batch_size",
+            "--batch_size",
             type=int,
-            help="The number of threads to run in a single loop.",
-            default=16,
+            help="Batch size for query and reward.",
+            default=8,
         )
-
+        parser.add_argument(
+            "--batch_number",
+            type=int,
+            help="Number of batches to run in a single loop.",
+            default=8,
+        )
         parser.add_argument(
             "--proxy.port",
             type=int,

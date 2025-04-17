@@ -93,10 +93,7 @@ class Validator(BaseValidatorNeuron):
         self.sync()
         self.miner_manager.update_miners_identity()
         self.wandb_manager = WandbManager(neuron = self)
-        self.query_queue = QueryQueue(
-            list(self.categories.keys()),
-            time_per_loop=self.config.loop_base_time,
-        )
+        self.query_queue = QueryQueue()
         if self.config.proxy.port:
             try:
                 self.validator_proxy = ValidatorProxy(self)
@@ -110,8 +107,6 @@ class Validator(BaseValidatorNeuron):
                     + traceback.format_exc()
                     + "\033[0m"
                 )
-        # Initialize ThreadPoolExecutor
-        # self.worker_thread_pool = ThreadPoolExecutor(max_workers=self.config.max_workers)
 
     def forward(self):
         """
@@ -120,10 +115,7 @@ class Validator(BaseValidatorNeuron):
         """
         self.store_miner_infomation()
         bt.logging.info("\033[1;34m🔄 Updating available models & uids\033[0m")
-        async_batch_size = self.config.async_batch_size
-        loop_base_time = self.config.loop_base_time  # default is 600 seconds
-        threads = []
-        loop_start = time.time()
+        loop_base_time = self.config.loop_base_time  # default is 600s
         self.miner_manager.update_miners_identity()
         self.query_queue.update_queue(self.miner_manager.all_uids_info)
         self.miner_uids = []
@@ -139,40 +131,26 @@ class Validator(BaseValidatorNeuron):
                 self.wandb_manager.wandb.finish()
                 self.wandb_manager.init_wandb()
 
-        # Query and reward
-        futures_with_metadata = []
-        for (
-            category,
-            uids,
-            should_rewards,
-            sleep_per_batch,
-        ) in self.query_queue.get_batch_query(async_batch_size):
-            bt.logging.info(
-                f"\033[1;34m🔍 Querying {len(uids)} uids for model {category}, sleep_per_batch: {sleep_per_batch}\033[0m"
-            )
-            thread = threading.Thread(
-                target=self.async_query_and_reward,
-                args=(category, uids, should_rewards),
-            )
-            threads.append(thread)
-            thread.start()
-            bt.logging.info(
-                f"\033[1;34m😴 Sleeping for {sleep_per_batch} seconds between batches\033[0m"
-            )
-            time.sleep(sleep_per_batch)
+        # run in 600s
+        loop_start = time.time()
+        while time.time() - loop_start < loop_base_time:
+            threads = []
+            for (uids, should_rewards) in self.query_queue.get_batch_query(self.config.batch_size, N=self.config.batch_number):
+                bt.logging.info(
+                    f"\033[1;34m🔍 Querying {len(uids)} uids for model {self.config.llm_client.gpt_model}\033[0m"
+                )
+                thread = threading.Thread(
+                    target=self.async_query_and_reward,
+                    args=(uids, should_rewards),
+                )
+                threads.append(thread)
+                thread.start()
 
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+            
         
-        # # Wait for all submitted tasks to complete
-        # for future, category, uids, should_rewards in as_completed(futures_with_metadata):
-        #     try:
-        #         future.result()
-        #     except Exception as exc:
-        #         # Get the args that were passed to the failed task
-        #         bt.logging.warning(f"\033[1;33m⚠️ Task failed with error: {exc}\nFuture: {future}\nCategory: {category}\nUids: {uids}\nShould rewards: {should_rewards}\033[0m")
-
         # Assign incentive rewards
         self.assign_incentive_rewards(self.miner_uids, self.miner_scores, self.miner_reward_logs)
 
@@ -180,14 +158,7 @@ class Validator(BaseValidatorNeuron):
         self.update_scores_on_chain()
         self.save_state()
         self.store_miner_infomation()
-
-        actual_time_taken = time.time() - loop_start
-
-        if actual_time_taken < loop_base_time:
-            bt.logging.info(
-                f"\033[1;34m😴 Sleeping for {loop_base_time - actual_time_taken} seconds\033[0m"
-            )
-            time.sleep(loop_base_time - actual_time_taken)
+        bt.logging.info(f"\033[1;32m🟢 Validator loop completed in {time.time() - loop_start} seconds\033[0m")
 
 
     def async_query_and_reward(
