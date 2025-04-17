@@ -116,6 +116,8 @@ This setup allows you to run the Validator locally by hosting a vLLM server. Whi
    echo "OPENAI_API_KEY=your_openai_api_key" >> .env
    echo "HF_TOKEN=your_hugging_face_token" >> .env (needed for some some datasets)
    echo "WANDB_API_KEY=your_wandb_api_key" >> .env
+   echo "VALIDATOR_USERNAME=your_validator_username" >> .env
+   echo "VALIDATOR_PASSWORD=your_validator_account" >> .env
    echo "USE_TORCH=1" >> .env
    ```
 

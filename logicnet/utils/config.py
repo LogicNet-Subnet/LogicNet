@@ -101,7 +101,18 @@ def add_args(cls, parser):
             help="Disables setting weights.",
             default=False,
         )
-
+        parser.add_argument(
+            "--neuron.validator_username",
+            type=str,
+            help="The username for the validator.",
+            default="validator",
+        )
+        parser.add_argument(
+            "--neuron.validator_password",
+            type=str,
+            help="The password for the validator.",
+            default="validator",
+        )
         parser.add_argument(
             "--neuron.axon_off",
             "--axon_off",

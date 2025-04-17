@@ -15,12 +15,13 @@ from typing import Tuple
 DATASET_WEIGHT = [60,20,20]
 
 class LogicChallenger:
-    def __init__(self, model_pool: dict):
+    def __init__(self, model_pool: dict, validator_mode: bool = True):
         self.model_pool = model_pool
         self.retry_count = 0
         self.task_pool_url = os.getenv("TASK_POOL_URL", "http://localhost:8088/api/v1")
         self.access_token = None
         self._login()
+        self.validator_mode = validator_mode
 
     def _login(self):
         """Login to TaskPoolServer to get access token"""
@@ -39,8 +40,30 @@ class LogicChallenger:
             raise
 
     def __call__(self, synapse: LogicSynapse) -> LogicSynapse:
-        self.get_challenge(synapse)
+        if self.validator_mode:
+            return self.get_challenge(synapse)
+        return self.get_dummy_challenge(synapse)
+    
+    def get_dummy_challenge(self, synapse: LogicSynapse):
+        ds = load_dataset("openai/gsm8k", "main")
+        bt.logging.debug("Generating problem using GSM8K dataset.")
+        data_set = ds['train']
+        bt.logging.info(f"Loaded GSM8K dataset with {len(data_set['question'])} entries")
+        random_index = random.randint(0, len(data_set['question']) - 1)
+        question = data_set['question'][random_index]
+        answer = data_set['answer'][random_index]
+        raw_question = f"Find the solution of this question:\n---\n{question}\n---\n"
+
+        # Revise the problem
+        conditions: dict = get_condition()
+        revised_logic_question: str = self.get_revised_logic_question(raw_question, conditions)
+        # update synapse
+        synapse.raw_logic_question = raw_question
+        synapse.ground_truth_answer = answer
+        synapse.logic_question = revised_logic_question
+        synapse.task_uid = "dummy"
         return synapse
+
 
     def get_challenge(self, synapse: LogicSynapse):
         # Generate a unique UID for this challenge
@@ -65,6 +88,7 @@ class LogicChallenger:
         synapse.ground_truth_answer = str(atom_logic_answer).replace("$", "").strip()
         synapse.logic_question = revised_logic_question
         synapse.task_uid = unique_uid  # Store the unique UID
+        return synapse
 
     def get_atom_logic_problem(self) -> Tuple[str, str]:
         """
@@ -112,10 +136,6 @@ class LogicChallenger:
             return self.get_atom_logic_problem()
 
     def get_revised_logic_question(self, logic_question: str, conditions: dict) -> str:
-        # prompt = "Please paraphrase by adding word or expression to this question as if you were a {profile} who is {mood} and write in a {tone} tone. You can use incorrect grammar, typo or add more context! Don't add your solution! Just say the revised version, you don't need to be polite.".format(
-        #     **conditions
-        # )
-
         if "python" in logic_question.lower() or "gen-code" in logic_question.lower():
             messages = [
                 {
