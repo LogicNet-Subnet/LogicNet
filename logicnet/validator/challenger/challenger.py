@@ -3,13 +3,12 @@ import openai
 import random
 import re
 import uuid
+import requests
 from logicnet.protocol import LogicSynapse
 from logicnet.validator.prompt import REPRHASE_CODE_TASK_TEMPLATE
 import bittensor as bt
 from .human_noise import get_condition
-from .math_generator.topics import TOPICS as topics
 from logicnet.utils.model_selector import model_selector
-import mathgenerator
 from datasets import load_dataset
 from typing import Tuple
 
@@ -18,7 +17,26 @@ DATASET_WEIGHT = [60,20,20]
 class LogicChallenger:
     def __init__(self, model_pool: dict):
         self.model_pool = model_pool
-        self.retry_count = 0 
+        self.retry_count = 0
+        self.task_pool_url = os.getenv("TASK_POOL_URL", "http://localhost:8088/api/v1")
+        self.access_token = None
+        self._login()
+
+    def _login(self):
+        """Login to TaskPoolServer to get access token"""
+        try:
+            response = requests.post(
+                f"{self.task_pool_url}/auth/login",
+                json={
+                    "username": os.getenv("VALIDATOR_USERNAME"),
+                    "password": os.getenv("VALIDATOR_PASSWORD")
+                }
+            )
+            response.raise_for_status()
+            self.access_token = response.json()["access_token"]
+        except Exception as e:
+            bt.logging.error(f"Failed to login to TaskPoolServer: {e}")
+            raise
 
     def __call__(self, synapse: LogicSynapse) -> LogicSynapse:
         self.get_challenge(synapse)
@@ -50,38 +68,48 @@ class LogicChallenger:
 
     def get_atom_logic_problem(self) -> Tuple[str, str]:
         """
-        Retrieve a random logic problem (question and answer) from one of several datasets.
+        Retrieve a random logic problem (question and answer) from TaskPoolServer.
         Returns:
             (atom_logic_question, atom_logic_answer) as a tuple of strings.
         """
         try:
-            # Select an atom question and answer from the Mathgenerator
-            selected_topic = random.choice(topics)
-            subtopic = selected_topic["subtopic"]
-            topic = selected_topic["topic"]
-            atom_question, atom_answer = eval(f"mathgenerator.{topic}.{subtopic}()")
+            headers = {"Authorization": f"Bearer {self.access_token}"}
+            response = requests.get(
+                f"{self.task_pool_url}/tasks/random",
+                headers=headers
+            )
+            
+            # Check for authentication/authorization errors
+            if response.status_code in [401, 403]:
+                bt.logging.warning("Authentication/Authorization error. Attempting to re-login...")
+                self._login()  # Re-login to get new token
+                headers = {"Authorization": f"Bearer {self.access_token}"}
+                response = requests.get(
+                    f"{self.task_pool_url}/tasks/random",
+                    headers=headers
+                )
+            
+            response.raise_for_status()
+            task_data = response.json()
+            
+            atom_question = task_data["question"]
+            atom_answer = task_data["answer"]
+            
             if atom_question is None or atom_answer is None:
                 raise ValueError("Failed to get atom logic problem")
-            bt.logging.debug("Generating math problem using Mathgenerator.")
-            subtopic = subtopic.replace("_", " ").capitalize()
-            topic = topic.replace("_", " ").capitalize()
-            atom_question = atom_question.replace("$", "").strip()
-            atom_question = (
-                f"Find the solution of this math problem:\n---\n"
-                f"Topic: {topic}, Subtopic: {subtopic}.\n{atom_question}\n---\n"
-            )
+            
+            bt.logging.debug("Successfully fetched task from TaskPoolServer")
+            return atom_question, atom_answer
+            
         except Exception as e:
             self.retry_count += 1
             if self.retry_count > 3:
                 bt.logging.error("Max retries reached. Returning a default question and answer.")
-                # A slightly more complex default question and answer:
                 return (
                     "A triangle has interior angles A, B, and C. If A + B + C represents the sum of these angles in degrees, find the value of A + B + C.",
                     "180"
                 )
             return self.get_atom_logic_problem()
-
-        return atom_question, atom_answer
 
     def get_revised_logic_question(self, logic_question: str, conditions: dict) -> str:
         # prompt = "Please paraphrase by adding word or expression to this question as if you were a {profile} who is {mood} and write in a {tone} tone. You can use incorrect grammar, typo or add more context! Don't add your solution! Just say the revised version, you don't need to be polite.".format(

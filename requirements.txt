@@ -14,4 +14,3 @@ loguru
 sympy
 wandb
 datasets
-git+https://github.com/lukew3/mathgenerator.git

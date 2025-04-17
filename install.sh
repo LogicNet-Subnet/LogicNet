@@ -1,9 +1,4 @@
 #!/bin/bash
-
-# Uninstalling mathgenerator
-echo "Uninstalling mathgenerator..."
-pip uninstall mathgenerator -y
-
 # Install the package in editable mode
 echo "Installing package in editable mode..."
 pip install -e .
@@ -11,10 +6,6 @@ pip install -e .
 # Uninstall uvloop if it's installed
 echo "Uninstalling uvloop..."
 pip uninstall uvloop -y
-
-# Install mathgenerator from GitHub
-echo "Installing mathgenerator..."
-pip install git+https://github.com/lukew3/mathgenerator.git
 
 # Check if USE_TORCH=1 is already set in .env
 if grep -q '^USE_TORCH=1$' .env; then

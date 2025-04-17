@@ -7,7 +7,7 @@ The Validator is responsible for generating challenges for the Miner to solve. I
 **Protocol**: `LogicSynapse`
 
 - **Validator Prepares**:
-  - `raw_logic_question`: A math problem generated using MathGenerator.
+  - `raw_logic_question`: A math problem
   - `logic_question`: A personalized challenge created by refining `raw_logic_question` with an LLM.
 - **Miner Receives**:
   - `logic_question`: The challenge to solve.
@@ -109,7 +109,6 @@ This setup allows you to run the Validator locally by hosting a vLLM server. Whi
    ```bash
    pip install -e .
    pip uninstall uvloop -y
-   pip install git+https://github.com/lukew3/mathgenerator.git
    ```
 
 3. **Set Up the `.env` File**

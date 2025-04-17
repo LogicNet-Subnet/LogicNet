@@ -36,7 +36,6 @@ or manually install the requirements
 ```bash
 pip install -e .
 pip uninstall uvloop -y
-pip install git+https://github.com/lukew3/mathgenerator.git
 ```
 
 - For ease of use, you can run the scripts with PM2. To install PM2:
