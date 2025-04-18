@@ -18,30 +18,33 @@ class QueryQueue:
         self.synthentic_queue = []
         self.proxy_queue = []
         self.synthentic_rewarded = {}
-        self.total_uids_remaining = 0
         self.current_synthetic_index = 0
         self.current_proxy_index = 0
 
     def update_queue(self, all_uids_info):
-        self.total_uids_remaining = 0
         self.synthentic_rewarded = {}
-        self.synthentic_queue.clear()
-        self.proxy_queue.clear()
+        self.synthentic_queue = []
+        self.proxy_queue = []
         self.current_synthetic_index = 0
         self.current_proxy_index = 0
 
         all_uids = []
+
+        min_rate_limit = min(all_uids_info.values(), key=lambda x: self.get_rate_limit_by_type(x.rate_limit)[0]).rate_limit
+
         for uid, info in all_uids_info.items():
             synthetic_rate_limit, proxy_rate_limit = self.get_rate_limit_by_type(info.rate_limit)
             all_uids.append(QueryItem(uid=uid))
+            normalized_rate_limit = synthetic_rate_limit // min_rate_limit
 
-            for _ in range(int(synthetic_rate_limit)):
+            for _ in range(int(normalized_rate_limit)):
                 self.synthentic_queue.append(QueryItem(uid=uid))
-            for _ in range(int(proxy_rate_limit)):
+            for _ in range(int(normalized_rate_limit)):
                 self.proxy_queue.append(QueryItem(uid=uid))
         
         # Shuffle the queue
         random.shuffle(self.synthentic_queue)
+        random.shuffle(self.proxy_queue)
         # Create new list with duplicated UIDs at start
         new_synthetic_queue = []
         # add full list UID at the start, make sure that all UID is queried at least twice
@@ -51,8 +54,6 @@ class QueryQueue:
         # add shuffled items
         new_synthetic_queue.extend(self.synthentic_queue)
         self.synthentic_queue = new_synthetic_queue
-        self.total_uids_remaining = len(self.synthentic_queue)
-
 
     def get_batch_query(self, batch_size: int, N: int):
         """
