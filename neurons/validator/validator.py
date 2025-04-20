@@ -328,6 +328,7 @@ class Validator(BaseValidatorNeuron):
         print(f"model_miner_count: {model_miner_count}")
         # The batch size is 8 or the number of miners
         batch_size = min(4, model_miner_count)
+        print(f"batch_size: {batch_size}")
         random.shuffle(uids_should_rewards)
         batched_uids_should_rewards = [
             uids_should_rewards[i * batch_size : (i + 1) * batch_size]
