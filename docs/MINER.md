@@ -166,10 +166,13 @@ pm2 start python --name "sn35-miner" -- neurons/miner/miner.py \
 --netuid 35 --wallet.name "wallet-name" --wallet.hotkey "wallet-hotkey" \
 --subtensor.network finney \
 --axon.port "your-open-port" \
+--axon.external_port "public-port" \
+--axon.external_ip "public-ip-address" \
 --miner.category Logic \ # specify the category to join. Currently, only Logic is supported
 --miner.epoch_volume 50 \ # commit no of requests to be solved in an epoch. It will affect the reward calculation
 --miner.llm_client.base_url http://localhost:8000/v1 \ # vLLM server base url
 --miner.llm_client.model Qwen/Qwen2-7B-Instruct \ # vLLM model name
+--miner.llm_client.key "llm-key"
 --logging.debug \ # Optional: Enable debug logging
 ```
 
