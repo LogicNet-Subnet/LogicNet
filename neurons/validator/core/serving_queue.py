@@ -31,7 +31,8 @@ class QueryQueue:
         all_uids = []
 
         min_rate_limit = min(all_uids_info.values(), key=lambda x: self.get_rate_limit_by_type(x.rate_limit)[0]).rate_limit
-
+        min_rate_limit=2
+        print(f"min_rate_limit: {min_rate_limit}")
         for uid, info in all_uids_info.items():
             synthetic_rate_limit, proxy_rate_limit = self.get_rate_limit_by_type(info.rate_limit)
             all_uids.append(QueryItem(uid=uid))

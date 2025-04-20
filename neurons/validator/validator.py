@@ -141,7 +141,7 @@ class Validator(BaseValidatorNeuron):
                 )
                 thread = threading.Thread(
                     target=self.async_query_and_reward,
-                    args=(uids, should_rewards),
+                    args=("Logic",uids, should_rewards),
                 )
                 threads.append(thread)
                 thread.start()
@@ -325,6 +325,7 @@ class Validator(BaseValidatorNeuron):
                 if info.category == category
             ]
         )
+        print(f"model_miner_count: {model_miner_count}")
         # The batch size is 8 or the number of miners
         batch_size = min(4, model_miner_count)
         random.shuffle(uids_should_rewards)
