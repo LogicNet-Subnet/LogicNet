@@ -360,8 +360,10 @@ class Validator(BaseValidatorNeuron):
             if score > 0.3 and rank <= 160:
                 incentive_rewards.append(incentive_formula(rank))
             else:
-                incentive_rewards.append(0)
-        
+                incentive_rewards.append(incentive_formula(250)) # add smallest reward for top 90 bad miners
+
+        bt.logging.info(f"\033[1;32m🟢 Final Uids: {final_uids}\033[0m")
+        bt.logging.info(f"\033[1;32m🟢 Incentive rewards: {incentive_rewards}\033[0m")
         self.miner_manager.update_scores(final_uids, incentive_rewards, representative_logs)
         
         # Reset logs for next epoch
