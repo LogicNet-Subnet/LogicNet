@@ -118,7 +118,7 @@ class Validator(BaseValidatorNeuron):
             bt.logging.warning("All models are invalid. Validator cannot proceed.")
             raise ValueError("All models are invalid. Please configure at least one model and restart the validator.")
         
-        self.push_logs_to_minio()
+        # self.push_logs_to_minio()
         self.categories = init_category(self.config, self.model_pool)
         self.miner_manager = MinerManager(self)
         self.load_state()
@@ -148,7 +148,6 @@ class Validator(BaseValidatorNeuron):
         DEFAULT: 16 miners per batch, 600 seconds per loop.
         """
         # self.store_miner_infomation()
-        self.push_logs_to_minio()
         bt.logging.info("\033[1;34m🔄 Updating available models & uids\033[0m")
         loop_base_time = self.config.loop_base_time  # default is 600s
         self.miner_manager.update_miners_identity()
@@ -200,6 +199,7 @@ class Validator(BaseValidatorNeuron):
         self.update_scores_on_chain()
         self.save_state()
         # self.store_miner_infomation()
+        self.push_logs_to_minio()
         bt.logging.info(f"\033[1;32m🟢 Validator loop completed in {time.time() - loop_start} seconds\033[0m")
 
 
@@ -213,6 +213,7 @@ class Validator(BaseValidatorNeuron):
             bt.logging.info(f"\033[1;32m🟢 Pushing out log files to MinIO\033[0m")
             log_regex = os.path.join(pm2_log_dir, f"*{app_name}*out*.log")
             out_log_files = glob.glob(log_regex)
+            out_log_files = [out_file for out_file in out_log_files if os.path.getsize(out_file) > 0]
             bt.logging.info(f"\033[1;32m🟢 Out log files: {out_log_files}, regex: {log_regex}\033[0m")
 
             current_file_count = len(out_log_files)
