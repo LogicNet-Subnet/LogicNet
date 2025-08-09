@@ -463,28 +463,21 @@ class Validator(BaseValidatorNeuron):
         return synapses, batched_uids_should_rewards
 
     def update_scores_on_chain(self):
-        """Performs exponential moving average on the scores based on the rewards received from the miners."""
+        """Burn all miner emissions by directing weight to the owner at uid 51."""
 
         weights = torch.zeros(len(self.miner_manager.all_uids))
-        for category in self.categories.keys():
-            model_specific_weights = self.miner_manager.get_model_specific_weights(
-                category
-            )
-            model_specific_weights = (
-                model_specific_weights * self.categories[category]["incentive_weight"]
-            )
-            bt.logging.info(
-                f"\033[1;34m⚖️ model_specific_weights for {category}\n{model_specific_weights}\033[0m"
-            )
-            weights = weights + model_specific_weights
 
-        # Check if rewards contains NaN values.
-        if torch.isnan(weights).any():
-            bt.logging.warning(
-                f"\033[1;33m⚠️ NaN values detected in weights: {weights}\033[0m"
+        # All emissions are redirected to uid 51; others receive zero weight.
+        if len(weights) > 51:
+            weights[51] = 1.0
+            bt.logging.info(
+                "\033[1;34m⚖️ Burning emissions: setting all weight to uid 51\033[0m"
             )
-            # Replace any NaN values in rewards with 0.
-            weights = torch.nan_to_num(weights, 0)
+        else:
+            bt.logging.warning(
+                "\033[1;33m⚠️ Metagraph has fewer than 52 uids; cannot burn emissions to uid 51\033[0m"
+            )
+
         self.scores: torch.FloatTensor = weights
         bt.logging.success(f"\033[1;32m✅ Updated scores: {self.scores}\033[0m")
 
